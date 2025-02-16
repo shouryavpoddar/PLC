@@ -18,22 +18,6 @@
 <V> ::= x | y | z
 ```
 ## Question 2
-```text
-<start1>  → <stmt3> ; <start3>
-<start2>  → <stmt4>
-<stmt1>   → <declare2>
-<stmt2>   → <assign2>
-<declare1> → <type3> <var>
-<type1>   → int
-<type2>   → double
-<assign1> → <var> = <expression3>
-<expression1> → <expression4> <op> <expression5>
-<expression2> → <value4>
-<op>      → + | - | * | ÷
-<value1>  → <var>
-<value2>  → <integer>
-<value3>  → <float>
-```
 
 ## Question 3
 
