@@ -264,8 +264,8 @@ $$
 
 **Step-by-step meaning**:
 
-1. Evaluate `<condition>` in \(\sigma\), producing \((b,\sigma_1)\).
+1. Evaluate `<condition>` in $$\(\sigma\)$$, producing $$\((b,\sigma_1)\)$$.
 2. If \(b\) is **true**:
-    - Evaluate the loop body \(S\) in \(\sigma_1\), yielding new state \(\sigma_2\).
-    - Re‐evaluate the entire `while` statement with \(\sigma_2\).
-3. If \(b\) is **false**:
+    - Evaluate the loop body $$\(S\)$$ in $$\(\sigma_1\)$$, yielding new state $$\(\sigma_2\)$$.
+    - Re‐evaluate the entire `while` statement with $$\(\sigma_2\)$$.
+3. If $$\(b\)$$ is **false**:
