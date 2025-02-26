@@ -1,0 +1,436 @@
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}   % Adjust page margins as needed
+\usepackage{amsmath,amssymb}        % For math symbols/environments
+\usepackage{listings}               % For code listings
+\usepackage[T1]{fontenc}            % Better font encoding
+\usepackage[utf8]{inputenc}         % UTF-8 support
+\usepackage{hyperref}               % Optional: hyperlinks in PDF
+
+\title{Homework Solutions}
+\author{Shourya Poddar}
+\date{\today}
+
+\begin{document}
+
+    \maketitle
+
+    \noindent
+    \textbf{Note:} The following document is a direct LaTeX rendition of the Markdown content, including all math formulas, code blocks, and textual explanations.
+
+    \section*{Question 1}
+
+    \subsection*{Step 1: Configure Precedence (Separate into Nonterminals)}
+
+    We split each precedence level into its own symbol, from lowest to highest:
+
+    \begin{enumerate}
+        \item \texttt{<A7>} -- handles assignment (\texttt{=})
+        \item \texttt{<B7>} -- handles the ternary operator (\texttt{?:})
+        \item \texttt{<C7>} -- handles logical OR (\texttt{||})
+        \item \texttt{<D7>} -- handles logical AND (\texttt{\&&})
+        \item \texttt{<E7>} -- handles logical NOT (\texttt{!})
+        \item \texttt{<G7>} -- handles parentheses, booleans, and variables
+        \item \texttt{<V7>} -- variable names
+    \end{enumerate}
+
+    \noindent\textbf{Roughly} (before enforcing associativity):
+    \begin{verbatim}
+<A7> → <V7> = <A7> | <B7>
+<B7> → <C7>?<B7>:<B7> | <C7>
+<C7> → <C7> || <D7> | <D7>
+<D7> → <D7> && <E7> | <E7>
+<E7> → !<E7> | <G7>
+<G7> → ( <A7> ) | true | false | <V7>
+<V7> → x | y | z
+    \end{verbatim}
+
+    \subsection*{Step 2: Add Right \& Left Associativities}
+
+    \begin{description}
+        \item[Right-associative:] \texttt{=}, \texttt{?:}, \texttt{!}
+        \begin{itemize}
+            \item The grammar \texttt{<A7> → <V7> = <A7> | <B7>} ensures we parse \texttt{=} from the \emph{right}.
+            \item \texttt{<B7> → <C7>?<B7>:<B7> | <C7>} also parses chained ternaries from the \emph{right}.
+            \item \texttt{<E7> → !<E7> | <G7>} is already right-associative because \texttt{!} recurses on \texttt{<E7>}.
+        \end{itemize}
+
+        \item[Left-associative:] \texttt{||}, \texttt{\&&}
+        \begin{itemize}
+            \item \texttt{<C7> → <C7> || <D7> | <D7>} means repeated \texttt{||} group left.
+            \item \texttt{<D7> → <D7> && <E7> | <E7>} means repeated \texttt{\&&} group left.
+        \end{itemize}
+    \end{description}
+
+    \noindent
+    Putting it all together in the final unambiguous grammar:
+
+    \begin{verbatim}
+<A7> → <V7> = <A7>
+     | <B7>
+
+<B7> → <C7> ? <B7> : <B7>
+     | <C7>
+
+<C7> → <C7> || <D7>
+     | <D7>
+
+<D7> → <D7> && <E7>
+     | <E7>
+
+<E7> → ! <E7>
+     | <G7>
+
+<G7> → ( <A7> )
+     | true
+     | false
+     | <V7>
+
+<V7> → x | y | z
+    \end{verbatim}
+
+    \section*{Question 2}
+
+    \subsection*{Characterizing the Attributes}
+    \textbf{Inherited Attributes}
+    \begin{itemize}
+        \item Typetable: passed down to statements
+        \item Initable: passed down to assignments and expressions
+    \end{itemize}
+
+    \textbf{Synthesized Attributes}
+    \begin{itemize}
+        \item type: computed up, property of expression
+        \item typebinding: computed up when variable declaration
+        \item initialized
+    \end{itemize}
+
+    \subsection*{1. Start Productions}
+
+    \textbf{\texttt{<start1> → <stmt3> ; <start3>}}
+    \begin{verbatim}
+<stmt3>.typetable := <start1>.typetable
+<stmt3>.inittable := <start1>.inittable
+<start3>.typetable := <start1>.typetable  // possibly updated after <stmt3>
+<start3>.inittable := <start1>.inittable  // possibly updated after <stmt3>
+    \end{verbatim}
+
+    \textbf{\texttt{<start2> → <stmt4>}}
+    \begin{verbatim}
+<stmt4>.typetable := <start2>.typetable
+<stmt4>.inittable := <start2>.inittable
+    \end{verbatim}
+
+    \subsection*{2. Statement Productions}
+
+    \textbf{\texttt{<stmt1> → <declare2>}}
+    \begin{verbatim}
+<declare2>.typetable := <stmt1>.typetable
+<declare2>.inittable := <stmt1>.inittable
+<stmt1>.typebinding := <declare2>.typebinding
+    \end{verbatim}
+
+    \textbf{\texttt{<stmt2> → <assign2>}}
+    \begin{verbatim}
+<assign2>.typetable := <stmt2>.typetable
+<assign2>.inittable := <stmt2>.inittable
+<stmt2>.initialized := <assign2>.initialized
+    \end{verbatim}
+
+    \subsection*{3. Declaration}
+
+    \textbf{\texttt{<declare2> → <type3> <var>}}
+    \begin{verbatim}
+<type3>.typetable := <declare2>.typetable
+<type3>.inittable := <declare2>.inittable
+<declare2>.typebinding := ( <var>, <type3>.type )
+<declare2>.initialized := ( <var>, false )
+    \end{verbatim}
+
+    \subsection*{4. Types}
+
+    \textbf{\texttt{<type1> → int}}
+    \begin{verbatim}
+<type1>.type := int
+    \end{verbatim}
+
+    \textbf{\texttt{<type2> → double}}
+    \begin{verbatim}
+<type2>.type := double
+    \end{verbatim}
+
+    \subsection*{5. Assignment}
+
+    \textbf{\texttt{<assign1> → <var> = <expression3>}}
+    \begin{verbatim}
+<expression3>.typetable := <assign1>.typetable
+<expression3>.inittable := <assign1>.inittable
+<assign1>.initialized := ( <var>, true )
+    \end{verbatim}
+
+    \subsection*{6. Expressions}
+
+    \textbf{\texttt{<expression1> → <expression4> <op> <expression5>}}
+    \begin{verbatim}
+<expression4>.typetable := <expression1>.typetable
+<expression5>.typetable := <expression1>.typetable
+<expression4>.inittable := <expression1>.inittable
+<expression5>.inittable := <expression1>.inittable
+<expression1>.type := <expression4>.type
+    \end{verbatim}
+
+    \textbf{\texttt{<expression2> → <value4>}}
+    \begin{verbatim}
+<value4>.typetable := <expression2>.typetable
+<value4>.inittable := <expression2>.inittable
+<expression2>.type := <value4>.type
+    \end{verbatim}
+
+    \textbf{\texttt{<op> → + | - | * | ÷}}
+
+    \subsection*{7. Values}
+
+    \textbf{\texttt{<value1> → <var>}}
+    \begin{verbatim}
+<var>.typetable := <value1>.typetable
+<var>.inittable := <value1>.inittable
+<value1>.type := <var>.type
+    \end{verbatim}
+
+    \textbf{\texttt{<value2> → <integer>}}
+    \begin{verbatim}
+<value2>.type := integer
+    \end{verbatim}
+
+    \textbf{\texttt{<value3> → <float>}}
+    \begin{verbatim}
+<value3>.type := double
+    \end{verbatim}
+
+    \subsection*{8. Terminals}
+
+    \begin{verbatim}
+<var> → a legal name in the language
+<integer> → a base 10 representation of an integer
+<float> → a base 10 representation of a floating point number
+    \end{verbatim}
+
+    \section*{Question 3}
+
+    \subsection*{(a) Type of Expression Must Match the Variable (Assignments)}
+
+    \textbf{Where:} Any \texttt{<assign>} production, i.e. \texttt{<assign1> → <var> = <expression3>}.
+
+    \textbf{Check:} Compare the variable’s declared type to the expression’s type. Formally:
+    \begin{verbatim}
+if <assign1>.typetable(<var>) != <expression3>.type then
+   error("Type mismatch in assignment")
+    \end{verbatim}
+
+    \subsection*{(b) A Variable Must Be Declared Before Use}
+
+    \textbf{Where:} Anywhere \texttt{<var>} appears
+    \textbf{At} \texttt{<assign1> → <var> = <expression3>}:
+    \begin{verbatim}
+if <assign1>.typetable(<var>) == error then
+   error("Use of undeclared variable in assignment")
+    \end{verbatim}
+
+    \textbf{At} \texttt{<value1> → <var>}:
+    \begin{verbatim}
+if <value1>.typetable(<var>) == error then
+   error("Use of undeclared variable in expression")
+    \end{verbatim}
+
+    \subsection*{(c) A Variable Must Be Initialized Before Use}
+
+    \textbf{Where:} Any place \texttt{<var>} is used but not assigned.
+    \textbf{At} \texttt{<value1> → <var>}:
+    \begin{verbatim}
+if <value1>.inittable(<var>) == false then
+   error("Use of uninitialized variable")
+    \end{verbatim}
+
+    \section*{Question 4}
+
+    \subsection*{Initial Code}
+    \begin{verbatim}
+// Precondition: n ≥ 0 and A has n elements indexed from 0
+1. bound = n;
+
+/* Outer loop invariant:
+   A[bound..(n-1)] is sorted (non-decreasing)
+   AND
+   every element in A[bound..(n-1)] ≥ all elements in A[0..bound-1]
+*/
+2. while (bound > 0) {
+
+3.    t = 0;
+4.    i = 0;
+
+     /* Inner loop invariant (given):
+        "A[t] is the largest element of A[0..t]"
+     */
+
+5.    while (i < bound - 1) {
+6.       if (A[i] > A[i+1]) {
+7.          swap = A[i];
+8.          A[i] = A[i+1];
+9.          A[i+1] = swap;
+10.         t = i+1;
+         }
+11.      i++;
+     }
+12.   bound = t;
+}
+
+// Postcondition: A[0] ≤ A[1] ≤ ... ≤ A[n-1]
+    \end{verbatim}
+
+    \subsection*{A1. Outer Loop Invariant}
+
+    \textbf{Claimed Invariant:}
+    \emph{``A[bound..(n-1)] is sorted (non-decreasing), and every element in that segment is ≥ every element in A[0..(bound-1)].''}
+
+    \textbf{1. Is It Correct?}
+    Yes. This is a valid invariant for a bubble sort variant in which \texttt{bound} shrinks from \texttt{n} down to \texttt{0}.
+
+    \textbf{2. Proof of Correctness}
+
+    \begin{itemize}
+        \item \textbf{Initialization:} At the very start, \texttt{bound = n}, so \texttt{A[n..(n-1)]} is an empty subarray (trivially sorted).
+        \item \textbf{Maintenance:} Assume the invariant holds at the start of an iteration. The inner loop bubbles up the largest element to the boundary, and we set \texttt{bound = t}. The subarray remains sorted and ≥ the earlier elements.
+        \item \textbf{Termination:} Eventually, \texttt{bound = 0} or \texttt{1}, meaning the whole array is sorted.
+    \end{itemize}
+
+    \subsection*{A2. Inner Loop Invariant}
+
+    \textbf{Claimed Invariant:}
+    \emph{``A[t] is the largest element of A[0..t].''}
+
+    \textbf{1. Is It Correct?}
+    Partly correct but needs refinement. The code sets \texttt{t} = \texttt{i+1} upon a swap, tracking the last swap position. If that position always holds the largest so far, then it is effectively correct.
+
+    \textbf{2. Proof (Refined Statement)}
+
+    \begin{itemize}
+        \item \textbf{Initialization:} \texttt{t=0, i=0}; trivially \texttt{A[t]} is largest in \texttt{A[0..0]}.
+        \item \textbf{Maintenance:} If a swap occurs, the bigger element ends up at \texttt{i+1}, so \texttt{t} moves there.
+        \item \textbf{Termination:} Once the inner loop ends, \texttt{bound = t}, ensuring the sorted portion is extended.
+    \end{itemize}
+
+    \subsection*{B. Weakest Preconditions (WP) for Each Numbered Statement}
+
+    \begin{enumerate}
+        \item \textbf{WP(1):} \texttt{n ≥ 0} and \texttt{A} has \texttt{n} elements
+        \item \textbf{WP(2):} Outer loop invariant holds
+        \item \textbf{WP(3):} \texttt{bound > 0}; \texttt{t=0} doesn’t break it
+        \item \textbf{WP(4):} Outer loop invariant; now \texttt{i=0}, \texttt{t=0}
+        \item \textbf{WP(5):} Inner loop invariant established, \texttt{i=0}, \texttt{t=0}
+        \item \textbf{WP(6):} \texttt{i < bound - 1}, valid indexing
+        \item \textbf{WP(7,8,9):} Swap is safe, \texttt{A[t]} remains largest in \texttt{A[0..t]}
+        \item \textbf{WP(10):} \texttt{t = i+1} if a swap occurred, preserving the largest element property
+        \item \textbf{WP(11):} \texttt{i++} still keeps the invariant
+        \item \textbf{WP(12):} \texttt{bound = t}, re-establish outer loop invariant
+    \end{enumerate}
+
+    \subsection*{C. Is WP(1) Inferred by the Code’s Precondition?}
+
+    Yes, the code’s given precondition is \texttt{n ≥ 0 and A has n elements}, which matches WP(1).
+
+    \section*{Question 5}
+
+    We want to define a function
+
+    $$
+    M_{\text{state}}\bigl(\langle \text{syntax} \rangle, \sigma\bigr)
+    $$
+
+    that takes a \emph{syntax tree} (for an \texttt{<assign>}, \texttt{<if>}, or \texttt{<while>}) and an \emph{initial state}
+    $$\sigma$$,
+    and returns a \emph{new state}.
+
+    \subsection*{Assumptions and Helper Mappings}
+
+    \begin{itemize}
+        \item \(\displaystyle M_{\text{int}}(\langle \text{expression} \rangle, \sigma)\): Evaluates a numeric expression in state \(\sigma\).
+        \item \(\displaystyle M_{\text{boolean}}(\langle \text{condition} \rangle, \sigma)\): Evaluates a condition in state \(\sigma\), returning `true`/`false`.
+        \item \(\displaystyle M_{\text{name}}(\langle \text{var}\rangle)\): Extracts the string name of the variable (no state needed).
+        \item \(\text{AddBinding}(\text{name}, \text{value}, \sigma)\): Returns a new state with `name → value`.
+        \item \(\text{RemoveBinding}(\text{name}, \sigma)\): Returns a new state removing that name’s old binding.
+    \end{itemize}
+
+    \subsection*{Side Effects}
+
+    Expressions and conditions can change the values of variables. Hence, \(M_{\text{int}}\) and \(M_{\text{boolean}}\) might return a pair \((\text{value}, \sigma')\).
+
+    \subsection*{A. Assignment}
+
+    \textbf{Syntax Rule:}
+    \begin{verbatim}
+<assign> → <var> = <expression>
+    \end{verbatim}
+
+    We first evaluate \(\langle \text{expression}\rangle\) in \(\sigma\), obtaining \((v,\sigma_1)\). Then we add a new binding of \(\langle \text{var}\rangle\) to \(v\) in \(\sigma_1\).
+
+    \[
+        M_{\text{state}}\bigl(\langle \text{var}\rangle = \langle \text{expression}\rangle,\;\sigma\bigr)
+        = \text{let } (v,\sigma_1) = M_{\text{int}}\bigl(\langle \text{expression}\rangle,\;\sigma\bigr)
+        \text{ in }
+        \text{AddBinding}\Bigl(
+        M_{\text{name}}\bigl(\langle \text{var}\rangle\bigr),
+        v,\;\sigma_1
+        \Bigr).
+    \]
+
+    \subsection*{B. If-Then-Else}
+
+    \textbf{Syntax Rule:}
+    \begin{verbatim}
+<if> → if <condition> then <statement1> else <statement2>
+    \end{verbatim}
+
+    \[
+        \begin{aligned}
+            M_{\text{state}}\bigl(\text{if } \langle \text{condition}\rangle \text{ then } S_1 \text{ else } S_2,\;\sigma\bigr)
+            &= \text{let } (b,\sigma_1) = M_{\text{boolean}}\bigl(\langle \text{condition}\rangle,\;\sigma\bigr) \\
+            &\quad \text{in }
+            \begin{cases}
+                M_{\text{state}}(S_1,\;\sigma_1), & \text{if } b = \text{true},\\
+                M_{\text{state}}(S_2,\;\sigma_1), & \text{if } b = \text{false}.
+            \end{cases}
+        \end{aligned}
+    \]
+
+    \subsection*{C. While Loop}
+
+    \textbf{Syntax Rule:}
+    \begin{verbatim}
+<while> → while <condition> <loop body>
+    \end{verbatim}
+
+    We repeatedly evaluate the condition; if true, we run the loop body and repeat; else we exit.
+
+    \[
+        \begin{aligned}
+            M_{\text{state}}\bigl(\text{while } \langle \text{condition}\rangle \; S,\;\sigma\bigr)
+            &= \text{let } (b,\sigma_1)
+            = M_{\text{boolean}}\bigl(\langle \text{condition}\rangle,\;\sigma\bigr) \\
+            &\quad \text{in }
+            \begin{cases}
+                M_{\text{state}}\Bigl(\text{while } \langle \text{condition}\rangle \; S,\;\sigma_2\Bigr),
+                & \text{if } b = \text{true},\\
+                \sigma_1,
+                & \text{if } b = \text{false}.
+            \end{cases}\\
+            &\quad \text{where } \sigma_2 = M_{\text{state}}(S,\;\sigma_1).
+        \end{aligned}
+    \]
+
+    \textbf{Step-by-step meaning}:
+    \begin{enumerate}
+        \item Evaluate \(\langle \text{condition}\rangle\) in \(\sigma\) to get \((b,\sigma_1)\).
+        \item If \(b = \text{true}\), evaluate \(S\) in \(\sigma_1\), producing \(\sigma_2\). Then do the `while` again with \(\sigma_2\).
+        \item If \(b = \text{false}\), terminate and return \(\sigma_1\).
+    \end{enumerate}
+
+\end{document}

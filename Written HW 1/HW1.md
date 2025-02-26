@@ -435,7 +435,9 @@ If $$\(M_{\text{int}}\)$$ can produce an error, you would handle it, but typical
 ```
 Denotational Semantics
 
-We evaluate the <condition> in state $$\( \sigma \)$$. Suppose that yields $$(b, σ_1)$$, where b is true or false, and $$\( \sigma_1 \)$$ is the possibly updated state:
+
+
+We evaluate the <condition> in state $\( \sigma \)$. Suppose that yields $$(b, σ_1)$$, where b is true or false, and $$\( \sigma_1 \)$$ is the possibly updated state:
 
 $$
 \begin{aligned}
