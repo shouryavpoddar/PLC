@@ -1,7 +1,6 @@
 #lang racket
 (require "lex.rkt")
 (require "simpleParser.rkt")
-(provide interpret)
 
 (define interpret
   (lambda (filename)
