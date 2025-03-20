@@ -70,11 +70,6 @@
     (if (doesExist? stmt state)
         (assign (car stmt) (cadr stmt) state)
         (error "variable not declared"))))
-;    (cond
-;      ((null? state) (error "Variable not declared"))
-;      ((eq? (car stmt) (caar state))(assign (car stmt) (cadr stmt) state))
-;      (else (assignStatement stmt (cdr state)))
-;     )))
 
 (define doesExist?
   (lambda (stmt state)
