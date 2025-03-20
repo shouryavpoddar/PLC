@@ -3,6 +3,10 @@
 (require "simpleParser.rkt")
 (provide interpret)
 
+;NOTE: expressionEval-cpsWrap is being used EVERYWHERE ABOVE EXPRESSION SECTION b/c CPS not implemented there yet
+         ;WHEN IMLPEMENTING CPS, if you see expressionEval-cpsWrap, replace it with CPS call to expressionEval
+
+
 (define interpret
   (lambda (filename)
     (statementList (parser filename) '())))
@@ -28,7 +32,7 @@
 
 (define whileStatement
   (lambda (stmts state)
-    (if (expressionEval (car stmts) state)
+    (if (expressionEval-cpsWrap (car stmts) state)
         
         (whileStatement stmts (statementEval (cadr stmts) state))
         
@@ -38,7 +42,7 @@
 
 (define ifStatement
   (lambda (stmts state)
-    (if (expressionEval (car stmts) state)
+    (if (expressionEval-cpsWrap (car stmts) state)
         (statementEval (cadr stmts) state)
         (if (null? (cddr stmts))
             state
@@ -49,9 +53,9 @@
 (define returnStatement
   (lambda (expression state)
     (cond
-      ((eq? #t (expressionEval (car expression) state)) 'true)
-      ((eq? #f (expressionEval (car expression) state)) 'false)
-      (else (expressionEval (car expression) state))
+      ((eq? #t (expressionEval-cpsWrap (car expression) state)) 'true)
+      ((eq? #f (expressionEval-cpsWrap (car expression) state)) 'false)
+      (else (expressionEval-cpsWrap (car expression) state))
      )))
 
 ;--------------------------- Declare ----------------------------------
@@ -83,7 +87,7 @@
   (lambda (name exp state)
     (cond
       ((null? name) (error "No name given"))
-      (else (addBinding name (expressionEval exp state) (removeBinding name state)))
+      (else (addBinding name (expressionEval-cpsWrap exp state) (removeBinding name state)))
     )))
 
 
@@ -106,96 +110,140 @@
       (else (cons (list name value) state))
        )))
 
-(define getVar
-  (lambda (name state)
+(define getVar 
+  (lambda (name state return)
     (cond
       ((null? name)(error "No name given"))
       ((null? state) (error "Variable not declared"))
       ((eq? name (caar state))
        (if (null? (cadar state))
            (error "Variable not assigned value")
-           (cadar state))
+           (return (cadar state)))
        )
-      (else (getVar name (cdr state)))
+      (else (getVar name (cdr state) return))
       )))
 
 
 
 ; ------------------- Expression Evalutation --------------------------
-
-(define expressionEval
+(define expressionEval-cpsWrap
   (lambda (exp state)
+    (expressionEval exp state (lambda (v) v))))
+
+;CPS DONE
+(define expressionEval
+  (lambda (exp state return)
     (cond
       ((null? exp) null)
 
      ;<int> -> [0-9]+
-     ((number?  exp) (exact-truncate exp))
+     ((number?  exp) (return (exact-truncate exp)))
      ;<boolean> -> true | false | <int>
-     ((eq? exp 'true) #t)
-     ((eq? exp 'false) #f)
+     ((eq? exp 'true) (return #t))
+     ((eq? exp 'false) (return #f))
      ; <var> -> x | y | z | <boolean>
-     ((symbol? exp) (getVar exp state))
+     ((symbol? exp) (getVar exp state return))    ;don't need to wrap in return b/c getVar is cps itself
      
      ; <uniary> -> -<var> |  !<var> | <var>
-     ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp)))) (- (expressionEval (cadr exp) state)))
-     ((and (list? exp) (eq? (car exp) '!)) (not (expressionEval (cadr exp) state)))
+     ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp))))
+      (expressionEval (cadr exp) state (lambda (v) (return (- v)))))
+     ((and (list? exp) (eq? (car exp) '!))
+      (expressionEval (cadr exp) state (lambda (v) (return (not v)))))
      
      ; <multi> -> <multi> * <unary> | <multi> * <unary> | <multi> % <unary> | <uniary>
      ((and (list? exp) (or (eq? (car exp) '%) (or (eq? (car exp) '*) (eq? (car exp) '/))))
-      (multi exp state)
-      )
+      (multi exp state return))
      ; <arith> -> <arith> + <multi> | <arith> - <multi> | <multi>
      ((and (list? exp) (or (eq? (car exp) '+) (eq? (car exp) '-)))
-      (arith exp state)
+      (arith exp state return)
       )
      ; <comp> -> <comp> < <arith>| <comp> > <arith>| <comp> ≤ <arith>| <comp> ≥ <arith>| <arith>
      ((or (eq? (car exp) '<) (or (eq? (car exp) '>) (or (eq? (car exp ) '<= ) (eq? (car exp) '>=))))
-      (comp exp state)
+      (comp exp state return)
       )
      ;<eql> -> <eql> == <comp> | <eql> != <comp> | <comp>
      ((and (list? exp) (or (eq? (car exp) '==) (eq? (car exp) '!=)))
-      (eql exp state)
+      (eql exp state return)
       )
      ;<and> -> <and> && <eql> | <eql>
      ((and (list? exp) (eq? (car exp) '&&))
-      (and (expressionEval (cadr exp) state) (expressionEval (caddr exp) state))
+      (expressionEval (cadr exp) state (lambda (v1)
+                                         (expressionEval (caddr exp) state (lambda (v2)
+                                                                             (return (and v1 v2))))))
       )
      ;<or> -> <or> || <and> | <and>
      ((and (list? exp) (eq? (car exp) '||))
-      (or (expressionEval (cadr exp) state) (expressionEval (caddr exp) state))
+      (expressionEval (cadr exp) state (lambda (v1)
+                                         (expressionEval (caddr exp) state (lambda (v2)
+                                                                             (return (or v1 v2))))))
       )
      )))
 
-
+;CPS DONE
 (define eql
-  (lambda (exp state)
+  (lambda (exp state return)
     (cond
-      ((eq? (car exp) '==)(eq? (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      (else (not (eq? (expressionEval(cadr exp) state) (expressionEval(caddr exp) state))))
+      ((eq? (car exp) '==)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                              (return (eq? v1 v2)))))))
+      (else
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                              (return (not (eq? v1 v2))))))))
       )))
 
+;CPS DONE
 (define comp
-  (lambda (exp state)
+  (lambda (exp state return)
     (cond
-      ((eq? (car exp) '<)(< (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      ((eq? (car exp) '>)(> (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      ((eq? (car exp) '<=)(<= (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      (else (>= (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
+      ((eq? (car exp) '<)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                              (return (< v1 v2)))))))
+      ((eq? (car exp) '>)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                              (return (> v1 v2)))))))
+      ((eq? (car exp) '<=)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                           (expressionEval (caddr exp) state (lambda (v2)
+                                                                               (return (<= v1 v2)))))))
+      (else
+       (expressionEval (cadr exp) state (lambda (v1)
+                                           (expressionEval (caddr exp) state (lambda (v2)
+                                                                               (return (>= v1 v2)))))))
      )))
 
+;CPS DONE
 (define multi
-  (lambda (exp state)
+  (lambda (exp state return)
     (cond
-      ((eq? (car exp) '*) (* (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      ((eq? (car exp) '%) (remainder (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      (else (exact-truncate (/ (expressionEval(cadr exp) state) (expressionEval(caddr exp) state))))
+      ((eq? (car exp) '*)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                           (expressionEval (caddr exp) state (lambda (v2)
+                                                                               (return (* v1 v2)))))))
+      ((eq? (car exp) '%)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                              (return (remainder v1 v2)))))))
+      (else (expressionEval (cadr exp) state (lambda (v1)
+                                               (expressionEval (caddr exp) state (lambda (v2)
+                                                                                   (return (exact-truncate (/ v1 v2))))))))
     )))
 
+;CPS DONE
 (define arith
-  (lambda (exp state)
+  (lambda (exp state return)
     (cond
-      ((eq? (car exp) '+) (+ (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
-      (else (- (expressionEval(cadr exp) state) (expressionEval(caddr exp) state)))
+      ((eq? (car exp) '+)
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                        (return (+ v1 v2)))))))
+      (else
+       (expressionEval (cadr exp) state (lambda (v1)
+                                          (expressionEval (caddr exp) state (lambda (v2)
+                                                                        (return (- v1 v2)))))))
       )))
 
 
