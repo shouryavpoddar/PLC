@@ -1,4 +1,22 @@
-var x = 2;
-while (x < 100)
-  x = x * 2;
+var x = 10;
+var y = 20;
+var x = x + y;
 return x;
+
+
+; CPS DONE: ET
+;(define getVar* 
+  (lambda (name state return)
+    (cond
+      ((null? name)(error "No name given"))
+      ;((null? state) (error "Variable not declared"))
+      ((list? (caar state))
+       (getVar* name (car state) (lambda (v)
+                                   (return v))))
+      ((eq? name (caar state))
+       (if (null? (cadar state))
+           (error "Variable not assigned value")
+           (return (cadar state)))
+       )
+      (else (getVar* name (cdr state) return))
+      )))
