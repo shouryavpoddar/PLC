@@ -9,107 +9,123 @@
 
 (define interpret
   (lambda (filename)
-    (statementList (parser filename) '())))
+    (statementList (parser filename) '() (lambda (v) v))))
 
 (define statementList
-  (lambda (lst state)
+  (lambda (lst state return)
     (cond
-      ((null?  lst) state)
-      (else (statementList(cdr lst) (statementEval (car lst) state))))))
+      ((null? lst) (return state))
+      (else (statementEval (car lst) state (lambda (s)
+                                             (statementList (cdr lst) s return)))))))
 
 (define statementEval
-  (lambda (statement state)
-    (
-     cond
-      ((eq? (car statement) 'return) (returnStatement (cdr statement) state))
-      ((eq? (car statement) 'var)(declareStatement (cdr statement) state))
-      ((eq? (car statement) '=)(assignStatement (cdr statement) state))
-      ((eq? (car statement) 'if)(ifStatement (cdr statement) state))
-      ((eq? (car statement) 'while)(whileStatement (cdr statement) state))
-      )))
+  (lambda (statement state return)
+    (cond
+      ((eq? (car statement) 'return) (returnStatement (cdr statement) state return))
+      ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
+      ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
+      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return))
+      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return)))))
 
 ;--------------------------- While Statement --------------------------
+;CPS DONE: SVP
 
 (define whileStatement
-  (lambda (stmts state)
-    (if (expressionEval-cpsWrap (car stmts) state)
-        
-        (whileStatement stmts (statementEval (cadr stmts) state))
-        
-        state)))
+  (lambda (stmts state return)
+    (expressionEval (car stmts) state
+                    (lambda (v)
+                      (if v
+                          (statementEval (cadr stmts) state
+                                         (lambda (s)
+                                           (whileStatement stmts s return)))
+                      (return state))))))
 
 ;--------------------------- If Statement -----------------------------
+;CPS DONE: SVP
 
 (define ifStatement
-  (lambda (stmts state)
-    (if (expressionEval-cpsWrap (car stmts) state)
-        (statementEval (cadr stmts) state)
-        (if (null? (cddr stmts))
-            state
-            (statementEval (caddr stmts) state)))))
+  (lambda (stmts state return)
+    (expressionEval (car stmts) state
+                    (lambda (v)
+                      (if v
+                          (statementEval (cadr stmts) state return)
+                          (if (null? (cddr stmts))
+                              (return state)
+                              (statementEval (caddr stmts) state return)))))))
 
 ;--------------------------- Return -----------------------------------
+;CPS DONE: SVP
 
 (define returnStatement
-  (lambda (expression state)
-    (cond
-      ((eq? #t (expressionEval-cpsWrap (car expression) state)) 'true)
-      ((eq? #f (expressionEval-cpsWrap (car expression) state)) 'false)
-      (else (expressionEval-cpsWrap (car expression) state))
-     )))
+  (lambda (expression state return)
+    (expressionEval (car expression) state
+                    (lambda (v)
+                      (cond
+                        ((eq? #t v) (return 'true))
+                        ((eq? #f v) (return 'false))
+                        (else (return v)))))))
 
 ;--------------------------- Declare ----------------------------------
+;CPS DONE: SVP
 
 (define declareStatement
-  (lambda (statement state)
+  (lambda (statement state return)
     ( cond
-       ((null? (cdr statement)) (assign (car statement) (cdr statement) state))
-       (else (assign (car statement) (cadr statement) state))
+       ((null? (cdr statement)) (assign (car statement) (cdr statement) state return))
+       (else (assign (car statement) (cadr statement) state return))
       )))
 
 
 ;--------------------------- Assigment --------------------------------
+;CPS DONE: SVP
+
 (define assignStatement
-  (lambda (stmt state)
+  (lambda (stmt state return)
     (if (doesExist? stmt state)
-        (assign (car stmt) (cadr stmt) state)
+        (assign (car stmt) (cadr stmt) state return)
         (error "variable not declared"))))
 
 (define doesExist?
   (lambda (stmt state)
     (cond
-      ((null? state) #f)
+      ((null? state)  #f)
       ((eq? (car stmt) (caar state)) #t)
-      (else (doesExist? stmt (cdr state)))
-     )))
+      (else (doesExist? stmt (cdr state))
+     ))))
 
 (define assign
-  (lambda (name exp state)
+  (lambda (name exp state return)
     (cond
-      ((null? name) (error "No name given"))
-      (else (addBinding name (expressionEval-cpsWrap exp state) (removeBinding name state)))
-    )))
-
+      ((null? name) (return (error "No name given")))
+      (else (expressionEval exp state
+                    (lambda (val)
+                      (removeBinding name state
+                                     (lambda (state-removed)
+                                       (addBinding name val state-removed return)))))))))
 
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
+; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
 
+; CPS DONE: SVP
 (define removeBinding
-  (lambda (name state)
+  (lambda (name state return)
     (cond
-     ((null? name)(error "No name given"))
-     ((null? state) '())
-     ((eq? name (caar state)) (cdr state))
-     (else (cons (car state) (removeBinding name (cdr state)))
-    ))))
+     ((null? name) (error "No name given"))
+     ((null? state) (return '()))
+     ((eq? name (caar state)) (return (cdr state)))
+     (else (removeBinding name (cdr state) (lambda (v) (return (cons (car state) v)))))
+    )))
 
+; CPS DONE: SVP
 (define addBinding
-  (lambda (name value state)
+  (lambda (name value state return)
     (cond
       ((null? name)(error "No name given"))
-      (else (cons (list name value) state))
+      (else (return (cons (list name value) state)))
        )))
 
+; CPS DONE: ET
 (define getVar 
   (lambda (name state return)
     (cond
@@ -134,7 +150,7 @@
 (define expressionEval
   (lambda (exp state return)
     (cond
-      ((null? exp) null)
+      ((null? exp) (return null))
 
      ;<int> -> [0-9]+
      ((number?  exp) (return (exact-truncate exp)))
