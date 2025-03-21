@@ -78,6 +78,8 @@
 
 ;--------------------------- Assigment --------------------------------
 ;CPS DONE: SVP
+(define firstName caar)
+(define firstValue cadar)
 
 (define assignStatement
   (lambda (stmt state return)
@@ -89,19 +91,41 @@
   (lambda (stmt state)
     (cond
       ((null? state)  #f)
-      ((eq? (car stmt) (caar state)) #t)
+      ((eq? (car stmt) (firstName state)) #t)
       (else (doesExist? stmt (cdr state))
      ))))
 
+;(define assign
+;  (lambda (name exp state return)
+;    (cond
+;      ((null? name) (return (error "No name given")))
+;      (else (expressionEval exp state
+;                    (lambda (val)
+;                      (removeBinding name state
+;                                     (lambda (state-removed)
+;                                       (addBinding name val state-removed return)))))))))
+
+
 (define assign
+  (lambda (name exp state return)
+    (
+
+
+
+(define searchAssign
   (lambda (name exp state return)
     (cond
       ((null? name) (return (error "No name given")))
-      (else (expressionEval exp state
-                    (lambda (val)
-                      (removeBinding name state
-                                     (lambda (state-removed)
-                                       (addBinding name val state-removed return)))))))))
+      ((null? state) return '())
+      ((list? (car state)) (searchAssign name exp (car state) (lambda (v1)
+                                                           (searchAssign name exp (cdr state) (lambda (v2)
+                                                                                           (cons v1 v2))))))
+      ((eq? name (firstName state)) expressionEval exp state (lambda (val)
+                                                               (removeBinding name state (lambda (state-removed)
+                                                                                           (addBinding name val state-removed return)))))
+      (else (searchAssign name exp (cdr state) (lambda (v)
+                                            (cons (car state) v)))))))
+
 
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
@@ -113,7 +137,7 @@
     (cond
      ((null? name) (error "No name given"))
      ((null? state) (return '()))
-     ((eq? name (caar state)) (return (cdr state)))
+     ((eq? name (firstName state)) (return (cdr state)))
      (else (removeBinding name (cdr state) (lambda (v) (return (cons (car state) v)))))
     )))
 
@@ -131,10 +155,10 @@
     (cond
       ((null? name)(error "No name given"))
       ((null? state) (error "Variable not declared"))
-      ((eq? name (caar state))
-       (if (null? (cadar state))
+      ((eq? name (firstName state))
+       (if (null? (firstValue state))
            (error "Variable not assigned value")
-           (return (cadar state)))
+           (return (firstValue state)))
        )
       (else (getVar name (cdr state) return))
       )))
