@@ -81,17 +81,19 @@
 
 (define assignStatement
   (lambda (stmt state return)
-    (if (doesExist? stmt state)
+    (if (declaredVar? (car stmt) state)
         (assign (car stmt) (cadr stmt) state return)
         (error "variable not declared"))))
 
-(define doesExist?
-  (lambda (stmt state)
+(define declaredVar?
+  (lambda (name state)
     (cond
-      ((null? state)  #f)
-      ((eq? (car stmt) (caar state)) #t)
-      (else (doesExist? stmt (cdr state))
-     ))))
+      ((null? state) #f)
+      ((list? (caar state))
+       (or (declaredVar? name (car state))    ; check inner block
+           (declaredVar? name (cdr state))))  ; check rest of state
+      ((eq? name (caar state)) #t)
+      (else (declaredVar? name (cdr state))))))
 
 (define assign
   (lambda (name exp state return)
@@ -99,13 +101,28 @@
       ((null? name) (return (error "No name given")))
       (else (expressionEval exp state
                     (lambda (val)
-                      (removeBinding name state
-                                     (lambda (state-removed)
-                                       (addBinding name val state-removed return)))))))))
+                      (if (declaredVar? name state)
+                          (replaceBinding name val state return)
+                          (addBinding name val state return))
+                      )))
+      )))
 
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
 ; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
+(define replaceBinding
+  (lambda (name val state return)
+    (cond
+      ((null? state) (return '()))
+      ((and (list? (car state)) (list? (caar state))
+            (replaceBinding name val (car state) (lambda (v1)
+                                                     (replaceBinding name val (cdr state) (lambda (v2)
+                                                                                            (return (cons v1 v2))))))))
+      ((eq? name (caar state)) (return (cons (list name val) (cdr state))))
+
+      (else (replaceBinding name val (cdr state) (lambda (rest)
+                                                   (return (cons (car state) rest)))))
+      )))
 
 ; CPS DONE: SVP
 (define removeBinding
@@ -121,22 +138,42 @@
 (define addBinding
   (lambda (name value state return)
     (cond
-      ((null? name)(error "No name given"))
-      (else (return (cons (list name value) state)))
-       )))
+      ((null? name) (error "No name given"))
+      ((null? state) (return (list (list name value))))
+      ((and (list? (car state)) (list? (caar state)))
+       (addBinding name value (car state)
+         (lambda (v)
+           (return (cons v (cdr state))))))
+      (else
+       (return (cons (list name value) state))))))
+
+(define getVar* 
+  (lambda (name state return)
+    (cond
+      ((null? state) (return '()))
+      ((list? (caar state))
+       (getVar* name (car state) (lambda (v1)
+                                   (getVar* name (cdr state) (lambda (v2)
+                                                               (cond
+                                                                 ((null? v1) (return v2))
+                                                                 (else (return v1))))))))
+      ((eq? name (caar state))
+       (if (null? (cadar state))
+           (error "Variable not assigned value")
+           (return (cadar state)))
+       )
+      (else (getVar* name (cdr state) return))
+      )))
 
 ; CPS DONE: ET
 (define getVar 
   (lambda (name state return)
     (cond
       ((null? name)(error "No name given"))
-      ((null? state) (error "Variable not declared"))
-      ((eq? name (caar state))
-       (if (null? (cadar state))
-           (error "Variable not assigned value")
-           (return (cadar state)))
-       )
-      (else (getVar name (cdr state) return))
+      (else (getVar* name state (lambda (v)
+                                  (cond
+                                    ((null? v) (error "Variable not declared"))
+                                    (else (return v))))))
       )))
 
 
