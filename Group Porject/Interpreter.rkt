@@ -4,7 +4,7 @@
 (provide interpret)
 
 ;NOTE: expressionEval-cpsWrap is being used EVERYWHERE ABOVE EXPRESSION SECTION b/c CPS not implemented there yet
-         ;WHEN IMLPEMENTING CPS, if you see expressionEval-cpsWrap, replace it with CPS call to expressionEval
+;WHEN IMLPEMENTING CPS, if you see expressionEval-cpsWrap, replace it with CPS call to expressionEval
 
 
 (define interpret
@@ -25,7 +25,17 @@
       ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
       ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
       ((eq? (car statement) 'if) (ifStatement (cdr statement) state return))
-      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return)))))
+      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return))
+      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return))
+      )))
+
+;----------------------------- Code Block -----------------------------
+
+(define codeBlockStatement
+  (lambda (stmts state return)
+    (statementList stmts (cons '() state) (lambda (v) (return (cdr v)))
+     )))
+
 
 ;--------------------------- While Statement --------------------------
 ;CPS DONE: SVP
@@ -89,7 +99,7 @@
   (lambda (name state)
     (cond
       ((null? state) #f)
-      ((list? (caar state))
+      ((or (null? (car state)) (list? (caar state)))
        (or (declaredVar? name (car state))    ; check inner block
            (declaredVar? name (cdr state))))  ; check rest of state
       ((eq? name (caar state)) #t)
@@ -114,7 +124,7 @@
   (lambda (name val state return)
     (cond
       ((null? state) (return '()))
-      ((and (list? (car state)) (list? (caar state))
+      ((and (list? (car state)) (or (null? (car state)) (list? (caar state)))
             (replaceBinding name val (car state) (lambda (v1)
                                                      (replaceBinding name val (cdr state) (lambda (v2)
                                                                                             (return (cons v1 v2))))))))
@@ -140,7 +150,7 @@
     (cond
       ((null? name) (error "No name given"))
       ((null? state) (return (list (list name value))))
-      ((and (list? (car state)) (list? (caar state)))
+      ((and (list? (car state)) (or (null? (car state)) (list? (caar state))))
        (addBinding name value (car state)
          (lambda (v)
            (return (cons v (cdr state))))))
@@ -151,7 +161,7 @@
   (lambda (name state return)
     (cond
       ((null? state) (return '()))
-      ((list? (caar state))
+      ((or (null? (car state)) (list? (caar state)))
        (getVar* name (car state) (lambda (v1)
                                    (getVar* name (cdr state) (lambda (v2)
                                                                (cond
