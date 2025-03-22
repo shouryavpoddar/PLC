@@ -4,66 +4,89 @@
 (provide interpret)
 
 ;NOTE: expressionEval-cpsWrap is being used EVERYWHERE ABOVE EXPRESSION SECTION b/c CPS not implemented there yet
-         ;WHEN IMLPEMENTING CPS, if you see expressionEval-cpsWrap, replace it with CPS call to expressionEval
+;WHEN IMLPEMENTING CPS, if you see expressionEval-cpsWrap, replace it with CPS call to expressionEval
 
 
 (define interpret
   (lambda (filename)
-    (statementList (parser filename) '() (lambda (v) v))))
+    (call/cc
+     (lambda (exit)
+       (statementList (parser filename) '() (lambda (v) v) exit #f #f)))))
 
 (define statementList
-  (lambda (lst state return)
+  (lambda (lst state return exit break-k continue-k)
     (cond
       ((null? lst) (return state))
-      (else (statementEval (car lst) state (lambda (s)
-                                             (statementList (cdr lst) s return)))))))
+      (else (statementEval (car lst) state
+                           (lambda (s)
+                             (statementList (cdr lst) s return exit break-k continue-k))
+                           exit break-k continue-k)))))
 
 (define statementEval
-  (lambda (statement state return)
+  (lambda (statement state return exit break-k continue-k)
     (cond
-      ((eq? (car statement) 'return) (returnStatement (cdr statement) state return))
+      ((eq? (car statement) 'return) (returnStatement (cdr statement) state exit))
       ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
       ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
-      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return))
-      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return)))))
+      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit break-k continue-k))
+      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit))
+      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit break-k continue-k))
+      ((eq? (car statement) 'break) (if break-k (break-k state) (error "'break' used outside of loop")))
+      ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop"))))
+    ))
+
+;----------------------------- Code Block -----------------------------
+
+(define codeBlockStatement
+  (lambda (stmts state return exit break-k continue-k)
+    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k
+     )))
+
 
 ;--------------------------- While Statement --------------------------
 ;CPS DONE: SVP
 
 (define whileStatement
-  (lambda (stmts state return)
-    (expressionEval (car stmts) state
-                    (lambda (v)
-                      (if v
-                          (statementEval (cadr stmts) state
-                                         (lambda (s)
-                                           (whileStatement stmts s return)))
-                      (return state))))))
+  (lambda (stmts state return exit)
+    (return (cdr (call/cc
+     (lambda (break-k)
+       (expressionEval (car stmts) state (lambda (v)
+                                          (if v
+                                              (whileStatement stmts
+                                                             (cdr (call/cc
+                                                              (lambda (continue-k)
+                                                                (statementEval (cadr stmts) state (lambda (s) (whileStatement stmts s return exit)) exit break-k continue-k))))
+                                                             return exit)
+                               (return state))
+                           ))
+     ))))))
+
+
 
 ;--------------------------- If Statement -----------------------------
 ;CPS DONE: SVP
 
 (define ifStatement
-  (lambda (stmts state return)
+  (lambda (stmts state return exit break-k continue-k)
     (expressionEval (car stmts) state
                     (lambda (v)
                       (if v
-                          (statementEval (cadr stmts) state return)
+                          (statementEval (cadr stmts) state return exit break-k continue-k)
                           (if (null? (cddr stmts))
                               (return state)
-                              (statementEval (caddr stmts) state return)))))))
+                              (statementEval (caddr stmts) state return exit break-k continue-k)))))))
 
 ;--------------------------- Return -----------------------------------
 ;CPS DONE: SVP
 
 (define returnStatement
-  (lambda (expression state return)
+  (lambda (expression state exit)
     (expressionEval (car expression) state
                     (lambda (v)
                       (cond
-                        ((eq? #t v) (return 'true))
-                        ((eq? #f v) (return 'false))
-                        (else (return v)))))))
+                        ((eq? #t v) (exit 'true))
+                        ((eq? #f v) (exit 'false))
+                        (else (exit v))))))) ; <-- jump directly to top-level
 
 ;--------------------------- Declare ----------------------------------
 ;CPS DONE: SVP
@@ -78,58 +101,52 @@
 
 ;--------------------------- Assigment --------------------------------
 ;CPS DONE: SVP
-(define firstName caar)
-(define firstValue cadar)
 
 (define assignStatement
   (lambda (stmt state return)
-    (if (doesExist? stmt state)
+    (if (declaredVar? (car stmt) state)
         (assign (car stmt) (cadr stmt) state return)
         (error "variable not declared"))))
 
-(define doesExist?
-  (lambda (stmt state)
+(define declaredVar?
+  (lambda (name state)
     (cond
-      ((null? state)  #f)
-      ((eq? (car stmt) (firstName state)) #t)
-      (else (doesExist? stmt (cdr state))
-     ))))
-
-;(define assign
-;  (lambda (name exp state return)
-;    (cond
-;      ((null? name) (return (error "No name given")))
-;      (else (expressionEval exp state
-;                    (lambda (val)
-;                      (removeBinding name state
-;                                     (lambda (state-removed)
-;                                       (addBinding name val state-removed return)))))))))
-
+      ((null? state) #f)
+      ((or (null? (car state)) (list? (caar state)))
+       (or (declaredVar? name (car state))    ; check inner block
+           (declaredVar? name (cdr state))))  ; check rest of state
+      ((eq? name (caar state)) #t)
+      (else (declaredVar? name (cdr state))))))
 
 (define assign
   (lambda (name exp state return)
-    (
-
-
-
-(define searchAssign
-  (lambda (name exp state return)
     (cond
       ((null? name) (return (error "No name given")))
-      ((null? state) return '())
-      ((list? (car state)) (searchAssign name exp (car state) (lambda (v1)
-                                                           (searchAssign name exp (cdr state) (lambda (v2)
-                                                                                           (cons v1 v2))))))
-      ((eq? name (firstName state)) expressionEval exp state (lambda (val)
-                                                               (removeBinding name state (lambda (state-removed)
-                                                                                           (addBinding name val state-removed return)))))
-      (else (searchAssign name exp (cdr state) (lambda (v)
-                                            (cons (car state) v)))))))
-
+      (else (expressionEval exp state
+                    (lambda (val)
+                      (if (declaredVar? name state)
+                          (replaceBinding name val state return)
+                          (addBinding name val state return))
+                      )))
+      )))
 
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
 ; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
+
+(define replaceBinding
+  (lambda (name val state return)
+    (cond
+      ((null? state) (return '()))
+      ((and (list? (car state)) (or (null? (car state)) (list? (caar state)))
+            (replaceBinding name val (car state) (lambda (v1)
+                                                     (replaceBinding name val (cdr state) (lambda (v2)
+                                                                                            (return (cons v1 v2))))))))
+      ((eq? name (caar state)) (return (cons (list name val) (cdr state))))
+
+      (else (replaceBinding name val (cdr state) (lambda (rest)
+                                                   (return (cons (car state) rest)))))
+      )))
 
 ; CPS DONE: SVP
 (define removeBinding
@@ -137,7 +154,7 @@
     (cond
      ((null? name) (error "No name given"))
      ((null? state) (return '()))
-     ((eq? name (firstName state)) (return (cdr state)))
+     ((eq? name (caar state)) (return (cdr state)))
      (else (removeBinding name (cdr state) (lambda (v) (return (cons (car state) v)))))
     )))
 
@@ -145,27 +162,48 @@
 (define addBinding
   (lambda (name value state return)
     (cond
-      ((null? name)(error "No name given"))
-      (else (return (cons (list name value) state)))
-       )))
+      ((null? name) (error "No name given"))
+      ((null? state) (return (list (list name value))))
+      ((and (list? (car state)) (or (null? (car state)) (list? (caar state))))
+       (addBinding name value (car state)
+         (lambda (v)
+           (return (cons v (cdr state))))))
+      (else
+       (return (cons (list name value) state))))))
+
+
+(define getVar* 
+  (lambda (name state return)
+    (cond
+      ((null? state) (return '()))
+      ((or (null? (car state)) (list? (caar state)))
+       (getVar* name (car state) (lambda (v1)
+                                   (getVar* name (cdr state) (lambda (v2)
+                                                               (cond
+                                                                 ((null? v1) (return v2))
+                                                                 (else (return v1))))))))
+      ((eq? name (caar state))
+       (if (null? (cadar state))
+           (error "Variable not assigned value")
+           (return (cadar state)))
+       )
+      (else (getVar* name (cdr state) return))
+      )))
 
 ; CPS DONE: ET
 (define getVar 
   (lambda (name state return)
     (cond
       ((null? name)(error "No name given"))
-      ((null? state) (error "Variable not declared"))
-      ((eq? name (firstName state))
-       (if (null? (firstValue state))
-           (error "Variable not assigned value")
-           (return (firstValue state)))
-       )
-      (else (getVar name (cdr state) return))
+      (else (getVar* name state (lambda (v)
+                                  (cond
+                                    ((null? v) (error "Variable not declared"))
+                                    (else (return v))))))
       )))
 
 
 
-; ------------------- Expression Evalutation --------------------------
+; ------------------- Expression Evalutation -------------------------
 (define expressionEval-cpsWrap
   (lambda (exp state)
     (expressionEval exp state (lambda (v) v))))
@@ -285,5 +323,3 @@
                                           (expressionEval (caddr exp) state (lambda (v2)
                                                                         (return (- v1 v2)))))))
       )))
-
-
