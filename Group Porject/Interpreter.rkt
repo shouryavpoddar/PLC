@@ -55,7 +55,7 @@
                                               (whileStatement stmts
                                                              (cdr (call/cc
                                                               (lambda (continue-k)
-                                                                (codeBlockStatement (cdadr stmts) state return exit break-k continue-k))))
+                                                                (statementEval (cadr stmts) state (lambda (s) (whileStatement stmts s return exit)) exit break-k continue-k))))
                                                              return exit)
                                (return state))
                            ))
@@ -323,5 +323,3 @@
                                           (expressionEval (caddr exp) state (lambda (v2)
                                                                         (return (- v1 v2)))))))
       )))
-
-
