@@ -11,32 +11,35 @@
   (lambda (filename)
     (call/cc
      (lambda (exit)
-       (statementList (parser filename) '() (lambda (v) v) exit)))))
+       (statementList (parser filename) '() (lambda (v) v) exit #f #f)))))
 
 (define statementList
-  (lambda (lst state return exit)
+  (lambda (lst state return exit break-k continue-k)
     (cond
       ((null? lst) (return state))
       (else (statementEval (car lst) state
                            (lambda (s)
-                             (statementList (cdr lst) s return exit))
-                           exit)))))
+                             (statementList (cdr lst) s return exit break-k continue-k))
+                           exit break-k continue-k)))))
 
 (define statementEval
-  (lambda (statement state return exit)
+  (lambda (statement state return exit break-k continue-k)
     (cond
-      ((eq? (car statement) 'return) (returnStatement (cdr statement) state exit)) ; call exit!
+      ((eq? (car statement) 'return) (returnStatement (cdr statement) state exit))
       ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
       ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
-      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit))
+      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit break-k continue-k))
       ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit))
-      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit)))))
+      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit break-k continue-k))
+      ((eq? (car statement) 'break) (if break-k (break-k state) (error "'break' used outside of loop")))
+      ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop"))))
+    ))
 
 ;----------------------------- Code Block -----------------------------
 
 (define codeBlockStatement
-  (lambda (stmts state return exit)
-    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit
+  (lambda (stmts state return exit break-k continue-k)
+    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k
      )))
 
 
@@ -45,27 +48,33 @@
 
 (define whileStatement
   (lambda (stmts state return exit)
-    (expressionEval (car stmts) state
-                    (lambda (v)
-                      (if v
-                          (statementEval (cadr stmts) state
-                                         (lambda (s)
-                                           (whileStatement stmts s return exit))
-                                         exit)
-                          (return state))))))
+    (return (cdr (call/cc
+     (lambda (break-k)
+       (expressionEval (car stmts) state (lambda (v)
+                                          (if v
+                                              (whileStatement stmts
+                                                             (cdr (call/cc
+                                                              (lambda (continue-k)
+                                                                (codeBlockStatement (cdadr stmts) state return exit break-k continue-k))))
+                                                             return exit)
+                               (return state))
+                           ))
+     ))))))
+
+
 
 ;--------------------------- If Statement -----------------------------
 ;CPS DONE: SVP
 
 (define ifStatement
-  (lambda (stmts state return exit)
+  (lambda (stmts state return exit break-k continue-k)
     (expressionEval (car stmts) state
                     (lambda (v)
                       (if v
-                          (statementEval (cadr stmts) state return exit)
+                          (statementEval (cadr stmts) state return exit break-k continue-k)
                           (if (null? (cddr stmts))
                               (return state)
-                              (statementEval (caddr stmts) state return exit)))))))
+                              (statementEval (caddr stmts) state return exit break-k continue-k)))))))
 
 ;--------------------------- Return -----------------------------------
 ;CPS DONE: SVP
@@ -194,7 +203,7 @@
 
 
 
-; ------------------- Expression Evalutation --------------------------
+; ------------------- Expression Evalutation -------------------------
 (define expressionEval-cpsWrap
   (lambda (exp state)
     (expressionEval exp state (lambda (v) v))))
