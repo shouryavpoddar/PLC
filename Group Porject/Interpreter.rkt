@@ -9,31 +9,34 @@
 
 (define interpret
   (lambda (filename)
-    (statementList (parser filename) '() (lambda (v) v))))
+    (call/cc
+     (lambda (exit)
+       (statementList (parser filename) '() (lambda (v) v) exit)))))
 
 (define statementList
-  (lambda (lst state return)
+  (lambda (lst state return exit)
     (cond
       ((null? lst) (return state))
-      (else (statementEval (car lst) state (lambda (s)
-                                             (statementList (cdr lst) s return)))))))
+      (else (statementEval (car lst) state
+                           (lambda (s)
+                             (statementList (cdr lst) s return exit))
+                           exit)))))
 
 (define statementEval
-  (lambda (statement state return)
+  (lambda (statement state return exit)
     (cond
-      ((eq? (car statement) 'return) (returnStatement (cdr statement) state return))
+      ((eq? (car statement) 'return) (returnStatement (cdr statement) state exit)) ; call exit!
       ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
       ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
-      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return))
-      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return))
-      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return))
-      )))
+      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit))
+      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit))
+      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit)))))
 
 ;----------------------------- Code Block -----------------------------
 
 (define codeBlockStatement
-  (lambda (stmts state return)
-    (statementList stmts (cons '() state) (lambda (v) (return (cdr v)))
+  (lambda (stmts state return exit)
+    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit
      )))
 
 
@@ -41,39 +44,40 @@
 ;CPS DONE: SVP
 
 (define whileStatement
-  (lambda (stmts state return)
+  (lambda (stmts state return exit)
     (expressionEval (car stmts) state
                     (lambda (v)
                       (if v
                           (statementEval (cadr stmts) state
                                          (lambda (s)
-                                           (whileStatement stmts s return)))
-                      (return state))))))
+                                           (whileStatement stmts s return exit))
+                                         exit)
+                          (return state))))))
 
 ;--------------------------- If Statement -----------------------------
 ;CPS DONE: SVP
 
 (define ifStatement
-  (lambda (stmts state return)
+  (lambda (stmts state return exit)
     (expressionEval (car stmts) state
                     (lambda (v)
                       (if v
-                          (statementEval (cadr stmts) state return)
+                          (statementEval (cadr stmts) state return exit)
                           (if (null? (cddr stmts))
                               (return state)
-                              (statementEval (caddr stmts) state return)))))))
+                              (statementEval (caddr stmts) state return exit)))))))
 
 ;--------------------------- Return -----------------------------------
 ;CPS DONE: SVP
 
 (define returnStatement
-  (lambda (expression state return)
+  (lambda (expression state exit)
     (expressionEval (car expression) state
                     (lambda (v)
                       (cond
-                        ((eq? #t v) (return 'true))
-                        ((eq? #f v) (return 'false))
-                        (else (return v)))))))
+                        ((eq? #t v) (exit 'true))
+                        ((eq? #f v) (exit 'false))
+                        (else (exit v))))))) ; <-- jump directly to top-level
 
 ;--------------------------- Declare ----------------------------------
 ;CPS DONE: SVP
@@ -120,6 +124,7 @@
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
 ; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
+
 (define replaceBinding
   (lambda (name val state return)
     (cond
@@ -156,6 +161,7 @@
            (return (cons v (cdr state))))))
       (else
        (return (cons (list name value) state))))))
+
 
 (define getVar* 
   (lambda (name state return)
