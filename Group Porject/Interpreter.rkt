@@ -32,8 +32,44 @@
       ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit))
       ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit break-k continue-k))
       ((eq? (car statement) 'break) (if break-k (break-k state) (error "'break' used outside of loop")))
-      ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop"))))
+      ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop")))
+      ((eq? (car statement) 'throw) (throw (cadr statement) state exit))
+    ((eq? (car statement) 'try) (tryCatchFinallyStatement (cdr statement) state return exit break-k continue-k)))
     ))
+
+;--------------------- Try Catch Finally Statements -------------------
+
+(define tryCatchFinallyStatement
+  (lambda (stmts state return exit break-k continue-k)
+    (let ((try-block (car stmts))
+          (catch-block (cadr stmts))
+          (has-finally? (not (null? (caddr stmts))))
+          (finally-block (if (null? (caddr stmts)) '() (cdaddr stmts))))
+      (call/cc
+       (lambda (throw-k)
+         (statementList try-block state
+           ;; Normal completion
+           (lambda (try-state)
+             (if has-finally?
+                 (statementList (car finally-block) try-state return exit break-k continue-k)
+                 (return try-state)))
+           ;; Exception caught via throw
+           (lambda (e)
+             (let* ((catch-param (caadr catch-block))
+                    (catch-body (caddr catch-block)))
+               (addBinding catch-param e state
+                 (lambda (state-with-exn)
+                   (statementList catch-body state-with-exn
+                     (lambda (catch-state)
+                       (if has-finally?
+                           (statementList (car finally-block) catch-state return exit break-k continue-k)
+                           (return catch-state)))
+                     exit break-k continue-k)))))
+           break-k continue-k))))))
+
+(define throw
+  (lambda (value state throw-k)
+    (expressionEval value state (lambda (v) (throw-k v)))))
 
 ;----------------------------- Code Block -----------------------------
 
@@ -59,7 +95,8 @@
                                                              return exit)
                                (return state))
                            ))
-     ))))))
+     ))))
+    ))
 
 
 
