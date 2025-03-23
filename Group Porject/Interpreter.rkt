@@ -42,34 +42,31 @@
 ;solve 19: THROW should give error if used outside of try scope. Use a try-k instead of exit, defined to throw error if like continue and break
 ;solve 17: ... e appears to be persisting outside of where its block should be de-allocated
 
+(define try-block (lambda (stmts) (car stmts)))
+(define catch-block (lambda (stmts) (cadr stmts)))
+(define has-finally? (lambda (stmts) (not (null? (caddr stmts)))))
+(define finally-block (lambda (stmts) (if (null? (caddr stmts)) '() (cdaddr stmts))))
+
 (define tryCatchFinallyStatement
   (lambda (stmts state return exit break-k continue-k throw-k)
-    (let ((try-block (car stmts))
-          (catch-block (cadr stmts))
-          (has-finally? (not (null? (caddr stmts))))
-          (finally-block (if (null? (caddr stmts)) '() (cdaddr stmts))))
-     ; (call/cc
-     ;  (lambda (throw-k)
-         (statementList try-block state
-           ;; Normal completion
-           (lambda (try-state)
-             (if has-finally?
-                 (statementList (car finally-block) try-state return exit break-k continue-k throw-k)
-                 (return try-state)))
-           exit break-k continue-k
-           ;; Exception caught via throw
-           (lambda (state-k e)
-             (let* ((catch-param (caadr catch-block))
-                    (catch-body (caddr catch-block)))
-               (addBinding catch-param e state-k
-                 (lambda (state-with-exn)
-                   (statementList catch-body state-with-exn
-                     (lambda (catch-state)
-                       (if has-finally?
-                           (statementList (car finally-block) catch-state return exit break-k continue-k throw-k)
-                           (return catch-state)))
-                     exit break-k continue-k throw-k)))
-               ))))));))
+    (statementList (try-block stmts) state
+      ;; Normal completion
+      (lambda (try-state)
+        (if (has-finally? stmts)
+            (statementList (car (finally-block stmts)) try-state return exit break-k continue-k throw-k)
+            (return try-state)))
+      exit break-k continue-k
+      ;; Exception caught via throw
+      (lambda (state-k e)
+        (addBinding (caadr (catch-block stmts)) e state-k
+          (lambda (state-with-exn)
+            (statementList (caddr (catch-block stmts)) state-with-exn
+              (lambda (catch-state)
+                (if (has-finally? stmts)
+                    (statementList (car (finally-block stmts)) catch-state return exit break-k continue-k throw-k)
+                    (return catch-state)))
+              exit break-k continue-k throw-k)))))))
+
 
 (define throw
   (lambda (value state throw-k)
