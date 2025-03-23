@@ -11,71 +11,75 @@
   (lambda (filename)
     (call/cc
      (lambda (exit)
-       (statementList (parser filename) '() (lambda (v) v) exit #f #f)))))
+       (statementList (parser filename) '() (lambda (v) v) exit #f #f #f)))))
 
 (define statementList
-  (lambda (lst state return exit break-k continue-k)
+  (lambda (lst state return exit break-k continue-k throw-k)
     (cond
       ((null? lst) (return state))
       (else (statementEval (car lst) state
                            (lambda (s)
-                             (statementList (cdr lst) s return exit break-k continue-k))
-                           exit break-k continue-k)))))
+                             (statementList (cdr lst) s return exit break-k continue-k throw-k))
+                           exit break-k continue-k throw-k)))))
 
 (define statementEval
-  (lambda (statement state return exit break-k continue-k)
+  (lambda (statement state return exit break-k continue-k throw-k)
     (cond
       ((eq? (car statement) 'return) (returnStatement (cdr statement) state exit))
       ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
       ((eq? (car statement) '=) (assignStatement (cdr statement) state return))
-      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit break-k continue-k))
-      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit))
-      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit break-k continue-k))
+      ((eq? (car statement) 'if) (ifStatement (cdr statement) state return exit break-k continue-k throw-k))
+      ((eq? (car statement) 'while) (whileStatement (cdr statement) state return exit throw-k))
+      ((eq? (car statement) 'begin) (codeBlockStatement (cdr statement) state return exit break-k continue-k throw-k))
       ((eq? (car statement) 'break) (if break-k (break-k state) (error "'break' used outside of loop")))
       ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop")))
-      ((eq? (car statement) 'throw) (throw (cadr statement) state exit))
-    ((eq? (car statement) 'try) (tryCatchFinallyStatement (cdr statement) state return exit break-k continue-k)))
+      ((eq? (car statement) 'throw) (if throw-k (throw (cadr statement) state throw-k) (error "'throw' used outside of try")))
+    ((eq? (car statement) 'try) (tryCatchFinallyStatement (cdr statement) state return exit break-k continue-k throw-k)))
     ))
 
 ;--------------------- Try Catch Finally Statements -------------------
 
+;solve 19: THROW should give error if used outside of try scope. Use a try-k instead of exit, defined to throw error if like continue and break
+;solve 17: ... e appears to be persisting outside of where its block should be de-allocated
+
 (define tryCatchFinallyStatement
-  (lambda (stmts state return exit break-k continue-k)
+  (lambda (stmts state return exit break-k continue-k throw-k)
     (let ((try-block (car stmts))
           (catch-block (cadr stmts))
           (has-finally? (not (null? (caddr stmts))))
           (finally-block (if (null? (caddr stmts)) '() (cdaddr stmts))))
-      (call/cc
-       (lambda (throw-k)
+     ; (call/cc
+     ;  (lambda (throw-k)
          (statementList try-block state
            ;; Normal completion
            (lambda (try-state)
              (if has-finally?
-                 (statementList (car finally-block) try-state return exit break-k continue-k)
+                 (statementList (car finally-block) try-state return exit break-k continue-k throw-k)
                  (return try-state)))
+           exit break-k continue-k
            ;; Exception caught via throw
-           (lambda (e)
+           (lambda (state-k e)
              (let* ((catch-param (caadr catch-block))
                     (catch-body (caddr catch-block)))
-               (addBinding catch-param e state
+               (addBinding catch-param e state-k
                  (lambda (state-with-exn)
                    (statementList catch-body state-with-exn
                      (lambda (catch-state)
                        (if has-finally?
-                           (statementList (car finally-block) catch-state return exit break-k continue-k)
+                           (statementList (car finally-block) catch-state return exit break-k continue-k throw-k)
                            (return catch-state)))
-                     exit break-k continue-k)))))
-           break-k continue-k))))))
+                     exit break-k continue-k throw-k)))
+               ))))));))
 
 (define throw
   (lambda (value state throw-k)
-    (expressionEval value state (lambda (v) (throw-k v)))))
+    (expressionEval value state (lambda (v) (throw-k state v)))))
 
 ;----------------------------- Code Block -----------------------------
 
 (define codeBlockStatement
-  (lambda (stmts state return exit break-k continue-k)
-    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k
+  (lambda (stmts state return exit break-k continue-k throw-k)
+    (statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k throw-k
      )))
 
 
@@ -83,7 +87,7 @@
 ;CPS DONE: SVP
 
 (define whileStatement
-  (lambda (stmts state return exit)
+  (lambda (stmts state return exit throw-k)
     (return (cdr (call/cc
      (lambda (break-k)
        (expressionEval (car stmts) state (lambda (v)
@@ -91,8 +95,8 @@
                                               (whileStatement stmts
                                                              (cdr (call/cc
                                                               (lambda (continue-k)
-                                                                (statementEval (cadr stmts) state (lambda (s) (whileStatement stmts s return exit)) exit break-k continue-k))))
-                                                             return exit)
+                                                                (statementEval (cadr stmts) state (lambda (s) (whileStatement stmts s return exit throw-k)) exit break-k continue-k throw-k))))
+                                                             return exit throw-k)
                                (return state))
                            ))
      ))))
@@ -104,14 +108,14 @@
 ;CPS DONE: SVP
 
 (define ifStatement
-  (lambda (stmts state return exit break-k continue-k)
+  (lambda (stmts state return exit break-k continue-k throw-k)
     (expressionEval (car stmts) state
                     (lambda (v)
                       (if v
-                          (statementEval (cadr stmts) state return exit break-k continue-k)
+                          (statementEval (cadr stmts) state return exit break-k continue-k throw-k)
                           (if (null? (cddr stmts))
                               (return state)
-                              (statementEval (caddr stmts) state return exit break-k continue-k)))))))
+                              (statementEval (caddr stmts) state return exit break-k continue-k throw-k)))))))
 
 ;--------------------------- Return -----------------------------------
 ;CPS DONE: SVP

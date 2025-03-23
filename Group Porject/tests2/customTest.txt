@@ -1,0 +1,17 @@
+var x = 10;
+
+try {
+    x = x + 5; 
+    try {
+      x = x * 2; 
+      throw 100;
+    } catch (e) {
+      x = x - e; 
+      throw 200;
+    }
+
+  } catch (e2) {
+    x = x + e2; 
+  }
+
+  return x;
