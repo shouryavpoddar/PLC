@@ -1,11 +1,11 @@
 #lang racket
 (require "Interpreter.rkt")
-(require "functionParser.rkt")
+(require "simpleParser.rkt")
 
 (define ubd_error "ERROR (Usage before declaring)")
 (define uba_error "ERROR (Usage before assignment)")
 (define ubr_error "ERROR (redeclaration)")
-(define result_list (list 150 -4 10 16 220 5 6 10 5 -39 ubd_error ubd_error uba_error ubr_error 'true 100 'false 'true 128 12 30 11 1106 12 16 72 21 164))
+(define result_list (list 20 164 32 2 ubd_error 25 21 6 -1 789 ubd_error ubd_error uba_error 12 125 110 2000400 101 ubd_error))
 
 (define dotest #t)
 (define testnumstring "")
@@ -14,7 +14,7 @@
 
 (define testproject
   (lambda ()
-    (displayln "Enter test number (1-28) OR")
+    (displayln "Enter test number (1-20) OR")
     (displayln "Enter -1 for custom test (test.txt)")
     (set! testnum (read))
     (cond
@@ -22,7 +22,7 @@
       ((< testnum 10) (set! testnumstring (string-append "0" (number->string testnum))))
       (else (set! testnumstring (number->string testnum))))
 
-    (set! testfile (string-append "tests/test" testnumstring ".txt"))
+    (set! testfile (string-append "tests2/test" testnumstring ".txt"))
 
     (displayln "Parser Result: ")
     (displayln (parser testfile))

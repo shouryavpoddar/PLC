@@ -1,6 +1,6 @@
 #lang racket
 (require "lex.rkt")
-(require "simpleParser.rkt")
+(require "functionParser.rkt")
 (provide interpret)
 
 ;main function of the program

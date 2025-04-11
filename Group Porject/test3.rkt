@@ -2,10 +2,10 @@
 (require "Interpreter.rkt")
 (require "functionParser.rkt")
 
-(define ubd_error "ERROR (Usage before declaring)")
-(define uba_error "ERROR (Usage before assignment)")
+(define mpa_error "ERROR (Mismatched parameters and arguments)")
+(define oos_error "ERROR (Out of scope)")
 (define ubr_error "ERROR (redeclaration)")
-(define result_list (list 150 -4 10 16 220 5 6 10 5 -39 ubd_error ubd_error uba_error ubr_error 'true 100 'false 'true 128 12 30 11 1106 12 16 72 21 164))
+(define result_list (list 10 14 45 55 1 115 'true 20 24 2 35 mpa_error 90 69 87 64 oos_error 125 100 2000400 3421 20332 21))
 
 (define dotest #t)
 (define testnumstring "")
@@ -14,7 +14,7 @@
 
 (define testproject
   (lambda ()
-    (displayln "Enter test number (1-28) OR")
+    (displayln "Enter test number (1-20) OR")
     (displayln "Enter -1 for custom test (test.txt)")
     (set! testnum (read))
     (cond
@@ -22,7 +22,7 @@
       ((< testnum 10) (set! testnumstring (string-append "0" (number->string testnum))))
       (else (set! testnumstring (number->string testnum))))
 
-    (set! testfile (string-append "tests/test" testnumstring ".txt"))
+    (set! testfile (string-append "tests3/test" testnumstring ".txt"))
 
     (displayln "Parser Result: ")
     (displayln (parser testfile))
