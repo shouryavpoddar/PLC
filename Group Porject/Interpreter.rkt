@@ -8,7 +8,7 @@
 (define interpret
   (lambda (filename)
     (S_globalPass filename (lambda (globalState)
-                             (V_callFunction 'main globalState (lambda (v) v))))))  ;call main function on the state compiled by global pass
+                             (V_callFunction 'main '() globalState (lambda (v) v))))))  ;call main function on the state compiled by global pass
 
 ;--------------------- Global Declarations-------------------
 
@@ -38,55 +38,70 @@
       )))
 
 ;abstraction for function name
-(define fname car)
+(define name car)
+;abstraction for formal param list
+(define params cadr)
+;abstraction for body of function
+(define body caddr)
 
 ;process function binding
 (define S_bindFunction
-  (lambda (function state return)
-    (V_closure function state (lambda (closure)
-                                (S_addBinding (fname function) closure state return)))
+  (lambda (f state return)    
+    (V_makeClosure (params f) (body f) (name f) state (lambda (closure) 
+                                                        (S_addBinding (name f) closure state return)))
     ))
-
-;abstraction for formal param list
-(define formalParamsIn cadr)
-;abstraction for body of function
-(define bodyIn caddr)
 
 ;generate function closure
-(define V_closure
-  (lambda (f state return)
-    (S_generateEnvironment state (lambda (env)
-                                   (return (list (formalParamsIn f) (bodyIn f) env))))
-    ))
+(define V_makeClosure
+  (lambda (params body fname localState return)
+    (return
+     (list params body (lambda (args selfClosure closureReturn)  ;pass a diff return for closure to maintain our CPS to the right place
+                         (S_bindParamsToArgs params args localState (lambda (paramState)
+                                                                      (S_addBinding fname selfClosure paramState closureReturn))))))))
 
-;function to generate environment for closure
-;TODO - MAKE THIS ACTUALLY DO SOMETHING - CURRENTLY JUST PASTES CURRENT STATE (will not support recursion & method hoisting)
-(define S_generateEnvironment
-  (lambda (state return)
-    (return state)
-    ))
+;helper to bind list of formal params to function arguments
+;ASSUMPTION - params and args are same length
+(define S_bindParamsToArgs
+  (lambda (params args localState return)
+    (if (null? params)
+        (return localState)
+        (S_addBinding (car params) (car args) localState (lambda (updatedState)
+                                                           (S_bindParamsToArgs (cdr params) (cdr args) updatedState return)))
+        )))
+
 
 ;--------------------- Function Execution-------------------
-;abstraction to get formal params from function closure
+;abstraction to get formal params from function closure - currently not needed
 (define cParams car)
 ;abstraction to get body from function closure
 (define cBody cadr)
 ;abstraction to get environment from function closure
-(define cEnv caddr)
+(define cEnvFunction caddr)
 
 ;calls a function and returns its output value or nothing
 (define V_callFunction
-  (lambda (fname state return)
+  (lambda (fname argExpressions state return)
     (V_get fname state (lambda (closure)
-                  (V_evaluateFunction closure state return)))))
+                         (V_evaluateArgs argExpressions state (lambda (args)
+                                                                (V_evaluateFunction args closure state return)))))))
+
+;helper to evaluate method arguments expressions and return list of their values
+(define V_evaluateArgs
+  (lambda (argExprs state return)
+    (if (null? argExprs)
+        (return '())
+        (V_expressionEval (car argExprs) state (lambda (v1)
+                                                 (V_evaluateArgs (cdr argExprs) state (lambda (v2)
+                                                                                        (return (cons v1 v2)))))))))
+                                                
 
 ;evaluates a function given its closure - helper
 (define V_evaluateFunction
-  (lambda (closure state return)
+  (lambda (args closure state return)  ;inparams list should be bound to formal params when generating function environment
     (return 
      (call/cc
       (lambda (exit)
-        (S_statementList (cBody closure) (cEnv closure) (lambda (v) v) exit #f #f #f))))))  ;call statement list on body of function
+        (S_statementList (cBody closure) ((cEnvFunction closure) args closure (lambda (v) v)) (lambda (v) v) exit #f #f #f))))))  ;call statement list on body of function
 
 
 ;--------------------- Statement List-------------------    
@@ -105,12 +120,17 @@
 (define stmtType car)
 ;abstraction for statement body
 (define stmtBody cdr)
+;abstraction for function name from statement body
+(define fName cadr)
+;abstraction for the function input parameters from the statement body
+(define fParams cddr)
 
 ;evaluates individual statement
 (define S_statementEval
   (lambda (statement state return exit break-k continue-k throw-k)
     (cond
       ((eq? (stmtType statement) 'return)   (V_returnStatement (stmtBody statement) state exit))
+      ((eq? (stmtType statement) 'funcall)  (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)))) ;return current state - discard output from function call
       ((eq? (stmtType statement) 'var)      (declareStatement (stmtBody statement) state return))
       ((eq? (stmtType statement) '=)        (S_assignStatement (stmtBody statement) state return))
       ((eq? (stmtType statement) 'if)       (S_ifStatement (stmtBody statement) state return exit break-k continue-k throw-k))
@@ -204,13 +224,13 @@
 
 ;handle returning
 (define V_returnStatement
-  (lambda (expression state exit)
-    (V_expressionEval (car expression) state
-                    (lambda (v)
-                      (cond
-                        ((eq? #t v) (exit 'true))
-                        ((eq? #f v) (exit 'false))
-                        (else (exit v))))))) ; <-- jump directly to top-level
+  (lambda (stmt state exit)
+        (V_expressionEval (car stmt) state
+                          (lambda (v)
+                            (cond
+                              ((eq? #t v) (exit 'true))
+                              ((eq? #f v) (exit 'false))
+                              (else (exit v))))))) ; <-- jump directly to top-level
 
 ;--------------------------- Declare ----------------------------------
 
@@ -335,54 +355,55 @@
 
 ; ------------------- Expression Evalutation -------------------------
 
-;evaluate value of an expression
+;evaluate value of an expression - also evaluates functions since they return values
 (define V_expressionEval
   (lambda (exp state return)
     (cond
       ((null? exp) (return null))
-
-     ;<int> -> [0-9]+
-     ((number?  exp) (return (exact-truncate exp)))
-     ;<boolean> -> true | false | <int>
-     ((eq? exp 'true) (return #t))
-     ((eq? exp 'false) (return #f))
-     ; <var> -> x | y | z | <boolean>
-     ((symbol? exp) (V_get exp state return))    ;don't need to wrap in return b/c getVar is cps itself
+      ;<int> -> [0-9]+
+      ((number?  exp) (return (exact-truncate exp)))
+      ;<boolean> -> true | false | <int>
+      ((eq? exp 'true) (return #t))
+      ((eq? exp 'false) (return #f))
+      ; <var> -> x | y | z | <boolean>
+      ((symbol? exp) (V_get exp state return))    ;don't need to wrap in return b/c getVar is cps itself
      
-     ; <uniary> -> -<var> |  !<var> | <var>
-     ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp))))
-      (V_expressionEval (cadr exp) state (lambda (v) (return (- v)))))
-     ((and (list? exp) (eq? (car exp) '!))
-      (V_expressionEval (cadr exp) state (lambda (v) (return (not v)))))
+      ; <uniary> -> -<var> |  !<var> | <var>
+      ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp))))
+       (V_expressionEval (cadr exp) state (lambda (v) (return (- v)))))
+      ((and (list? exp) (eq? (car exp) '!))
+       (V_expressionEval (cadr exp) state (lambda (v) (return (not v)))))
      
-     ; <multi> -> <multi> * <unary> | <multi> * <unary> | <multi> % <unary> | <uniary>
-     ((and (list? exp) (or (eq? (car exp) '%) (or (eq? (car exp) '*) (eq? (car exp) '/))))
-      (V_multi exp state return))
-     ; <arith> -> <arith> + <multi> | <arith> - <multi> | <multi>
-     ((and (list? exp) (or (eq? (car exp) '+) (eq? (car exp) '-)))
-      (V_arith exp state return)
-      )
-     ; <comp> -> <comp> < <arith>| <comp> > <arith>| <comp> ≤ <arith>| <comp> ≥ <arith>| <arith>
-     ((or (eq? (car exp) '<) (or (eq? (car exp) '>) (or (eq? (car exp ) '<= ) (eq? (car exp) '>=))))
-      (V_comp exp state return)
-      )
-     ;<eql> -> <eql> == <comp> | <eql> != <comp> | <comp>
-     ((and (list? exp) (or (eq? (car exp) '==) (eq? (car exp) '!=)))
-      (V_eql exp state return)
-      )
-     ;<and> -> <and> && <eql> | <eql>
-     ((and (list? exp) (eq? (car exp) '&&))
-      (V_expressionEval (cadr exp) state (lambda (v1)
-                                         (V_expressionEval (caddr exp) state (lambda (v2)
-                                                                             (return (and v1 v2))))))
-      )
-     ;<or> -> <or> || <and> | <and>
-     ((and (list? exp) (eq? (car exp) '||))
-      (V_expressionEval (cadr exp) state (lambda (v1)
-                                         (V_expressionEval (caddr exp) state (lambda (v2)
-                                                                             (return (or v1 v2))))))
-      )
-     )))
+      ; <multi> -> <multi> * <unary> | <multi> * <unary> | <multi> % <unary> | <uniary>
+      ((and (list? exp) (or (eq? (car exp) '%) (or (eq? (car exp) '*) (eq? (car exp) '/))))
+       (V_multi exp state return))
+      ; <arith> -> <arith> + <multi> | <arith> - <multi> | <multi>
+      ((and (list? exp) (or (eq? (car exp) '+) (eq? (car exp) '-)))
+       (V_arith exp state return)
+       )
+      ; <comp> -> <comp> < <arith>| <comp> > <arith>| <comp> ≤ <arith>| <comp> ≥ <arith>| <arith>
+      ((or (eq? (car exp) '<) (or (eq? (car exp) '>) (or (eq? (car exp ) '<= ) (eq? (car exp) '>=))))
+       (V_comp exp state return)
+       )
+      ;<eql> -> <eql> == <comp> | <eql> != <comp> | <comp>
+      ((and (list? exp) (or (eq? (car exp) '==) (eq? (car exp) '!=)))
+       (V_eql exp state return)
+       )
+      ;<and> -> <and> && <eql> | <eql>
+      ((and (list? exp) (eq? (car exp) '&&))
+       (V_expressionEval (cadr exp) state (lambda (v1)
+                                            (V_expressionEval (caddr exp) state (lambda (v2)
+                                                                                  (return (and v1 v2))))))
+       )
+      ;<or> -> <or> || <and> | <and>
+      ((and (list? exp) (eq? (car exp) '||))
+       (V_expressionEval (cadr exp) state (lambda (v1)
+                                            (V_expressionEval (caddr exp) state (lambda (v2)
+                                                                                  (return (or v1 v2))))))
+       )
+      ;function
+      ((eq? (car exp) 'funcall) (V_callFunction (fName exp) (fParams exp) state return))
+      )))
 
 ;evaluate equality 
 (define V_eql
