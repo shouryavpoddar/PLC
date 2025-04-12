@@ -3,14 +3,95 @@
 (require "functionParser.rkt")
 (provide interpret)
 
+
 ;main function of the program
 (define interpret
   (lambda (filename)
-    (call/cc
-     (lambda (exit)
-       (S_statementList (parser filename) '() (lambda (v) v) exit #f #f #f)))))
+    (S_globalPass filename (lambda (globalState)
+                             (V_callFunction 'main globalState (lambda (v) v))))))  ;call main function on the state compiled by global pass
 
-;top level - runs statements in statement list in order
+;--------------------- Global Declarations-------------------
+
+;first pass of file execution - binds all functions and global variables to state
+(define S_globalPass
+  (lambda (filename return)
+    (S_globalDeclarationList (parser filename) '() return)))
+
+;top level of global declarations - runs global declarations in declaration list in order
+(define S_globalDeclarationList
+  (lambda (lst state return)
+    (cond
+      ((null? lst) (return state))
+      (else (S_globalDeclarationEval (car lst) state (lambda (s)
+                                                       (S_globalDeclarationList (cdr lst) s return)))))))
+
+;abstraction for declare type
+(define dclrType car)
+(define dclrBody cdr)
+
+;processes individual global declaration
+(define S_globalDeclarationEval
+  (lambda (declaration state return)
+    (cond
+      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return))
+      ((eq? (dclrType declaration) 'function) (S_bindFunction (dclrBody declaration) state return))
+      )))
+
+;abstraction for function name
+(define fname car)
+
+;process function binding
+(define S_bindFunction
+  (lambda (function state return)
+    (V_closure function state (lambda (closure)
+                                (S_addBinding (fname function) closure state return)))
+    ))
+
+;abstraction for formal param list
+(define formalParamsIn cadr)
+;abstraction for body of function
+(define bodyIn caddr)
+
+;generate function closure
+(define V_closure
+  (lambda (f state return)
+    (S_generateEnvironment state (lambda (env)
+                                   (return (list (formalParamsIn f) (bodyIn f) env))))
+    ))
+
+;function to generate environment for closure
+;TODO - MAKE THIS ACTUALLY DO SOMETHING - CURRENTLY JUST PASTES CURRENT STATE (will not support recursion & method hoisting)
+(define S_generateEnvironment
+  (lambda (state return)
+    (return state)
+    ))
+
+;--------------------- Function Execution-------------------
+;abstraction to get formal params from function closure
+(define cParams car)
+;abstraction to get body from function closure
+(define cBody cadr)
+;abstraction to get environment from function closure
+(define cEnv caddr)
+
+;calls a function and returns its output value or nothing
+(define V_callFunction
+  (lambda (fname state return)
+    (V_get fname state (lambda (closure)
+                  (V_evaluateFunction closure state return)))))
+
+;evaluates a function given its closure - helper
+(define V_evaluateFunction
+  (lambda (closure state return)
+    (return 
+     (call/cc
+      (lambda (exit)
+        (S_statementList (cBody closure) (cEnv closure) (lambda (v) v) exit #f #f #f))))))  ;call statement list on body of function
+
+
+;--------------------- Statement List-------------------    
+
+;top level of line-by-line code execution- runs statements in statement list in order
 (define S_statementList
   (lambda (lst state return exit break-k continue-k throw-k)
     (cond
@@ -20,21 +101,35 @@
                              (S_statementList (cdr lst) s return exit break-k continue-k throw-k))
                            exit break-k continue-k throw-k)))))
 
+;abstraction for statement type
+(define stmtType car)
+;abstraction for statement body
+(define stmtBody cdr)
+
 ;evaluates individual statement
 (define S_statementEval
   (lambda (statement state return exit break-k continue-k throw-k)
     (cond
-      ((eq? (car statement) 'return) (V_returnStatement (cdr statement) state exit))
-      ((eq? (car statement) 'var) (declareStatement (cdr statement) state return))
-      ((eq? (car statement) '=) (S_assignStatement (cdr statement) state return))
-      ((eq? (car statement) 'if) (S_ifStatement (cdr statement) state return exit break-k continue-k throw-k))
-      ((eq? (car statement) 'while) (S_whileStatement (cdr statement) state return exit throw-k))
-      ((eq? (car statement) 'begin) (S_codeBlockStatement (cdr statement) state return exit break-k continue-k throw-k))
-      ((eq? (car statement) 'break) (if break-k (break-k state) (error "'break' used outside of loop")))
-      ((eq? (car statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop")))
-      ((eq? (car statement) 'throw) (if throw-k (SV_throw (cadr statement) state throw-k) (error "'throw' used outside of try")))
-    ((eq? (car statement) 'try) (S_tryCatchFinallyStatement (cdr statement) state return exit break-k continue-k throw-k)))
+      ((eq? (stmtType statement) 'return)   (V_returnStatement (stmtBody statement) state exit))
+      ((eq? (stmtType statement) 'var)      (declareStatement (stmtBody statement) state return))
+      ((eq? (stmtType statement) '=)        (S_assignStatement (stmtBody statement) state return))
+      ((eq? (stmtType statement) 'if)       (S_ifStatement (stmtBody statement) state return exit break-k continue-k throw-k))
+      ((eq? (stmtType statement) 'while)    (S_whileStatement (stmtBody statement) state return exit throw-k))
+      ((eq? (stmtType statement) 'begin)    (S_codeBlockStatement (stmtBody statement) state return exit break-k continue-k throw-k))
+      ((eq? (stmtType statement) 'break)    (if break-k (break-k state) (error "'break' used outside of loop")))
+      ((eq? (stmtType statement) 'continue) (if continue-k (continue-k state) (error "'continue' used outside of loop")))
+      ((eq? (stmtType statement) 'throw)    (if throw-k (SV_throw (cadr statement) state throw-k) (error "'throw' used outside of try")))
+      ((eq? (stmtType statement) 'try)      (S_tryCatchFinallyStatement (stmtBody statement) state return exit break-k continue-k throw-k)))
     ))
+
+;----------------------------- Code Block -----------------------------
+
+;handle entering and exiting code blocks
+(define S_codeBlockStatement
+  (lambda (stmts state return exit break-k continue-k throw-k)
+    (S_statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k throw-k
+     )))
+
 
 ;--------------------- Try Catch Finally Statements -------------------
 
@@ -69,14 +164,6 @@
 (define SV_throw
   (lambda (value state throw-k)
     (V_expressionEval value state (lambda (v) (throw-k state v)))))  ;pass state and exception value
-
-;----------------------------- Code Block -----------------------------
-
-;handle entering and exiting code blocks
-(define S_codeBlockStatement
-  (lambda (stmts state return exit break-k continue-k throw-k)
-    (S_statementList stmts (cons '() state) (lambda (v) (return (cdr v))) exit break-k continue-k throw-k
-     )))
 
 
 ;--------------------------- While Statement --------------------------
@@ -215,13 +302,13 @@
        (return (cons (list name (box value)) state))))))    ;used to be name value
 
 ;helper to get the value of a variable from state
-(define V_getVar* 
+(define V_get* 
   (lambda (name state return)
     (cond
       ((null? state) (return '()))
       ((or (null? (car state)) (list? (caar state)))
-       (V_getVar* name (car state) (lambda (v1)
-                                   (V_getVar* name (cdr state) (lambda (v2)
+       (V_get* name (car state) (lambda (v1)
+                                   (V_get* name (cdr state) (lambda (v2)
                                                                (cond
                                                                  ((null? v1) (return v2))
                                                                  (else (return v1))))))))
@@ -230,15 +317,15 @@
            (error "Variable not assigned value")
            (return (unbox (cadar state))))
        )
-      (else (V_getVar* name (cdr state) return))
+      (else (V_get* name (cdr state) return))
       )))
 
 ;wrapper to check for errors when gettign variables from state 
-(define V_getVar 
+(define V_get 
   (lambda (name state return)
     (cond
       ((null? name)(error "No name given"))
-      (else (V_getVar* name state (lambda (v)
+      (else (V_get* name state (lambda (v)
                                   (cond
                                     ((null? v) (error "Variable not declared"))
                                     (else (return v))))))
@@ -260,7 +347,7 @@
      ((eq? exp 'true) (return #t))
      ((eq? exp 'false) (return #f))
      ; <var> -> x | y | z | <boolean>
-     ((symbol? exp) (V_getVar exp state return))    ;don't need to wrap in return b/c getVar is cps itself
+     ((symbol? exp) (V_get exp state return))    ;don't need to wrap in return b/c getVar is cps itself
      
      ; <uniary> -> -<var> |  !<var> | <var>
      ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp))))
