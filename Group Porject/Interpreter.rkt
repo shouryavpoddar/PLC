@@ -185,13 +185,13 @@
             (S_replaceBinding name val (car state) (lambda (v1)
                                                      (S_replaceBinding name val (cdr state) (lambda (v2)
                                                                                             (return (cons v1 v2)))))))
-      ((eq? name (caar state)) (return (cons (list name val) (cdr state))))
+      ((eq? name (caar state)) (return (begin (set-box! (cadar state) val) (cons (list name (cadar state)) (cdr state))))) ;(cons (list name val) (cdr state))))
 
       (else (S_replaceBinding name val (cdr state) (lambda (rest)
                                                    (return (cons (car state) rest))))))
       ))
 
-;remove a binding from state
+;remove a binding from state ; NOTE - currently not used
 (define S_removeBinding
   (lambda (name state return)
     (cond
@@ -206,13 +206,13 @@
   (lambda (name value state return)
     (cond
       ((null? name) (error "No name given"))
-      ((null? state) (return (list (list name value))))
+      ((null? state) (return (list (list name (box value)))))
       ((and (list? (car state)) (or (null? (car state)) (list? (caar state))))
        (S_addBinding name value (car state)
          (lambda (v)
            (return (cons v (cdr state))))))
       (else
-       (return (cons (list name value) state))))))
+       (return (cons (list name (box value)) state))))))    ;used to be name value
 
 ;helper to get the value of a variable from state
 (define V_getVar* 
@@ -228,7 +228,7 @@
       ((eq? name (caar state))
        (if (null? (cadar state))
            (error "Variable not assigned value")
-           (return (cadar state)))
+           (return (unbox (cadar state))))
        )
       (else (V_getVar* name (cdr state) return))
       )))
