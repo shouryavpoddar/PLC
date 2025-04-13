@@ -1,20 +1,27 @@
-var x = 10;
-var result = 1;
+function main() {
+  var result;
+  var base;
 
-try {
-  while (x < 10000) {
-     result = result - 1;
-     x = x + 10;
+  function getpow(a) {
+     var x;
 
-     if (x > 1000) {
-       throw x;
+     function setanswer(n) {
+        result = n;
      }
-     else if (x > 100) {
-        break;
+
+     function recurse(m) {
+       if (m > 0) {
+         x = x * base;
+         recurse(m-1);
+       }
+       else
+         setanswer(x);
      }
+
+     x = 1;
+     recurse(a);
   }
+  base = 2;
+  getpow(6);
+  return result;
 }
-finally {
-  result = result + x;
-}
-return result;
