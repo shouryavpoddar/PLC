@@ -33,7 +33,7 @@
 (define S_globalDeclarationEval
   (lambda (declaration state return)
     (cond
-      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return))
+      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return #f))
       ((eq? (dclrType declaration) 'function) (S_bindFunction (dclrBody declaration) state return))
       )))
 
@@ -200,8 +200,7 @@
     (cond
       ((eq? (stmtType statement) 'return)
        (V_returnStatement (stmtBody statement) state exit throw-k))
-      ((eq? (stmtType statement) 'funcall)
- (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))
+      ((eq? (stmtType statement) 'funcall) (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))
       ;; NEW clause: Nested function declaration
       ((eq? (stmtType statement) 'function)
        (S_bindFunction (stmtBody statement) state return))
