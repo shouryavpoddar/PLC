@@ -271,7 +271,7 @@
       exit break-k continue-k
       ;; Exception caught:
       (lambda (state-k e)
-        (S_addBinding (car (cadr (catch-block stmts))) e state-k
+        (S_addBinding (car (cadr (catch-block stmts))) e state
           (lambda (state-with-exn)
             (S_statementList (caddr (catch-block stmts))
                              state-with-exn
@@ -384,7 +384,7 @@
                                                     (if (and (pair? v1) (eq? (car v1) 'updated))  ;check if this created the update
                                                          (return (cons (cdr v1) (cdr state)))    ;if so, stop calling S_replaceBinding on cdr and return updated state (with flag removed)
                                                          (S_replaceBinding name val (cdr state) (lambda (v2)
-                                                                                                      (return (cons v1 v2))))))));)
+                                                                                                      (return (cons v1 v2))))))))
       ((eq? name (caar state)) (return (begin (set-box! (cadar state) val) (cons 'updated (cons (list name (cadar state)) (cdr state)))))) ;add 'updated flag so we know to stop recursing
 
       (else (S_replaceBinding name val (cdr state) (lambda (rest)

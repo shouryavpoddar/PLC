@@ -1,3 +1,6 @@
+var toot;
+
+
 function divide(x, y) {
   if (y == 0)
     throw 1000000;
