@@ -200,7 +200,8 @@
     (cond
       ((eq? (stmtType statement) 'return)
        (V_returnStatement (stmtBody statement) state exit throw-k))
-      ((eq? (stmtType statement) 'funcall) (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))
+      ((eq? (stmtType statement) 'funcall)
+       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))
       ;; NEW clause: Nested function declaration
       ((eq? (stmtType statement) 'function)
        (S_bindFunction (stmtBody statement) state return))
@@ -380,12 +381,16 @@
       ((null? state) (return '()))
       ((and (list? (car state)) (or (null? (car state)) (list? (caar state))))
             (S_replaceBinding name val (car state) (lambda (v1)
-                                                     (S_replaceBinding name val (cdr state) (lambda (v2)
-                                                                                            (return (cons v1 v2)))))))
-      ((eq? name (caar state)) (return (begin (set-box! (cadar state) val) (cons (list name (cadar state)) (cdr state))))) ;(cons (list name val) (cdr state))))
+                                                    (if (and (pair? v1) (eq? (car v1) 'updated))  ;check if this created the update
+                                                         (return (cons (cdr v1) (cdr state)))    ;if so, stop calling S_replaceBinding on cdr and return updated state (with flag removed)
+                                                         (S_replaceBinding name val (cdr state) (lambda (v2)
+                                                                                                      (return (cons v1 v2))))))));)
+      ((eq? name (caar state)) (return (begin (set-box! (cadar state) val) (cons 'updated (cons (list name (cadar state)) (cdr state)))))) ;add 'updated flag so we know to stop recursing
 
       (else (S_replaceBinding name val (cdr state) (lambda (rest)
-                                                   (return (cons (car state) rest))))))
+                                                     (if (and (pair? rest) (eq? (car rest) 'updated))  ;check if we processed the update
+                                                              (return (cons 'updated (cons (car state) (cdr rest))))   ;if we processed update, move flag to front of returned state segment
+                                                              (return (cons (car state) rest)))))))
       ))
 
 ;remove a binding from state ; NOTE - currently not used
