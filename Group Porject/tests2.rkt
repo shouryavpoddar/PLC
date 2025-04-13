@@ -1,6 +1,6 @@
 #lang racket
 (require "Interpreter.rkt")
-(require "simpleParser.rkt")
+(require "functionParser.rkt")
 
 (define ubd_error "ERROR (Usage before declaring)")
 (define uba_error "ERROR (Usage before assignment)")

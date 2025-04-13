@@ -126,12 +126,19 @@
           throw-k))))
 
 ; Check if a variable is declared in a single frame (the current block)
-(define declaredInFrame?
+(define V_declaredInFrame?
   (lambda (name frame)
     (cond
       ((null? frame) #f)
       ((eq? name (caar frame)) #t)
-      (else (declaredInFrame? name (cdr frame))))))
+      (else (V_declaredInFrame? name (cdr frame))))))
+
+(define V_searchFrame
+  (lambda (name bindings return)
+    (cond
+      ((null? bindings) (error "Should not happen: variable declared but binding not found"))
+      ((eq? name (caar bindings)) (return (cadar bindings))) ; found it!
+      (else (V_searchFrame name (cdr bindings) return)))))
 
 
 (define V_declaredVarInCurrentBlock?
@@ -139,17 +146,17 @@
     (if (null? state)
         (return #f)
         ; state’s car is the top frame.
-        (return (declaredInFrame? name (car state))))))
+        (return (V_declaredInFrame? name (car state))))))
 
 
 ; Helper: replace binding in one frame.
-(define replaceInFrame
+(define V_replaceInFrame
   (lambda (name val frame)
     (cond
       ((null? frame) '())
       ((eq? name (caar frame))
        (cons (list name (box val)) (cdr frame)))
-      (else (cons (car frame) (replaceInFrame name val (cdr frame)))))))
+      (else (cons (car frame) (V_replaceInFrame name val (cdr frame)))))))
 
 ; Replace binding for name in the current (top) frame only.
 (define S_replaceBindingInCurrentBlock
@@ -158,7 +165,7 @@
         (error "No block frame available")
         (let ((top (car state))
               (rest (cdr state)))
-          (return (cons (replaceInFrame name val top) rest))))))
+          (return (cons (V_replaceInFrame name val top) rest))))))
 
 ;evaluates a function given its closure - helper
 (define V_evaluateFunction
@@ -353,7 +360,7 @@
   (lambda (name state cont)
     (if (null? state)
         (cont #f)
-        (if (declaredInFrame? name (car state))
+        (if (V_declaredInFrame? name (car state))
             (cont #t)
             (V_declaredVar? name (cdr state) cont)))))
 
@@ -417,24 +424,24 @@
        (return (cons (list name (box value)) state))))))    ;used to be name value
 
 ;helper to get the value of a variable from state
-(define V_get* 
+
+(define V_get*
   (lambda (name state return)
     (if (null? state)
-        (return '())  ; Not found in any frame.
+        (return '())  ; variable not found
         (let ((frame (car state)))
-          (if (declaredInFrame? name frame)
-              ;; Found declared in current frame; now search the frame's bindings:
-              (let loop ((bindings frame))
-                (cond
-                  ((null? bindings)
-                   (error "Should not happen: binding declared but not found"))
-                  ((eq? name (caar bindings))
-                   (if (null? (cadar bindings))
-                       (error "Variable not assigned value")
-                       (return (unbox (cadar bindings)))))
-                  (else (loop (cdr bindings)))))
-              ;; If not in this frame, search the outer frames.
+          (if (V_declaredInFrame? name frame)
+              ;; Search this frame's bindings recursively
+              (V_searchFrame name frame
+                             (lambda (val)
+                               (if (null? val)
+                                   (error "Variable not assigned value")
+                                   (return (unbox val)))))
+              ;; Else, move to the outer frame
               (V_get* name (cdr state) return))))))
+
+
+
 
 ;wrapper to check for errors when gettign variables from state 
 (define V_get 

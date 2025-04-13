@@ -1,3 +1,5 @@
-var x = 1;
-break;
-return x;
+function main() {
+    var x = 1;
+    break;
+    return x;
+}
