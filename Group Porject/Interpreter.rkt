@@ -1,3 +1,5 @@
+;Ethan Tobey, Shourya Poddar
+
 #lang racket
 (require "lex.rkt")
 (require "functionParser.rkt")
