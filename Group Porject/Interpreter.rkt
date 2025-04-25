@@ -2,7 +2,7 @@
 
 #lang racket
 (require "lex.rkt")
-(require "functionParser.rkt")
+(require "classParser.rkt")
 (provide interpret)
 
 

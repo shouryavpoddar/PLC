@@ -1,0 +1,55 @@
+#lang racket
+(require "Interpreter.rkt")
+(require "classParser.rkt")
+
+(define mpa_error "ERROR (Mismatched parameters and arguments)")
+(define oos_error "ERROR (Out of scope)")
+(define ubr_error "ERROR (redeclaration)")
+(define result_list (list 10 14 45 55 1 115 'true 20 24 2 35 mpa_error 90 69 87 64 oos_error 125 100 2000400 3421 20332 21))
+
+(define dotest #t)
+(define testnumstring "")
+(define testnum 0)
+(define testfile "")
+
+(define testproject
+  (lambda ()
+    (displayln "Enter test number (1-13, 21-24, 31-37, 41-42, 51-54) OR")
+    (displayln "Enter -1 for custom test (test.txt)")
+    (set! testnum (read))
+    (cond
+      ((< testnum 0) (set! testnumstring ""))
+      ((< testnum 10) (set! testnumstring (string-append "0" (number->string testnum))))
+      (else (set! testnumstring (number->string testnum))))
+
+    (set! testfile (string-append "tests4/test" testnumstring ".txt"))
+
+    (displayln "Parser Result: ")
+    (displayln (parser testfile))
+
+    ; Adjusted index for result_list
+    (cond
+      ((> testnum 0)
+       (let ((adjusted-testnum
+              (cond
+                ((<= testnum 13) testnum)
+                ((<= testnum 24) (- testnum 7)) ; skip 14-20
+                ((<= testnum 37) (- testnum 13)) ; skip 14-20, 25-30
+                ((<= testnum 42) (- testnum 18)) ; skip more
+                ((<= testnum 54) (- testnum 25)) ; and more
+                (else testnum)))) ; fallback
+
+         (displayln "Expected Result: ")
+         (displayln (list-ref result_list (- adjusted-testnum 1)))))
+      (else
+       (displayln "No expected result for custom test")))
+
+    (displayln "Interpreter Result: ")
+    (displayln (interpret testfile))
+
+    (displayln "Run another test? (y/n)")
+    (if (not (eq? (read) 'y))
+        (set! dotest #f)
+
+(testproject))))
+
