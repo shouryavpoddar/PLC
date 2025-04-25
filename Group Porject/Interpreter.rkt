@@ -9,13 +9,34 @@
 ;main function of the program
 (define interpret
   (lambda (filename)
-    (S_globalPass filename (lambda (globalState)
+    (S_methodPass filename (lambda (globalState)   ;this should call classPass
                              (V_callFunction 'main '() globalState (lambda (v) v) #f)))))  ;call main function on the state compiled by global pass
+
+;----------------------Global Class Pass------------------
+
+;1. define S_classPass
+     ;this function should go through outer level of parse and run through list of class declarations
+     ;probably have a classDeclarationList -> classDeclarationEval methods
+
+;2. define classDeclarationEval
+    ; this should call bindClass
+
+;3. define bindClass
+     ;this should create class binding, will need to call createClassClosure
+
+;-----------------------Class Closures--------------------------
+
+;4. define createClassClosure
+      ; class closure should contain:
+         ;a)parent/super class
+         ;b) list of instance field names and expressions that compute their initial values (if any)
+         ;c) list of method names and their closures
+         ;      - doing this will likely require calling S_methodPass (adjusted) inside the class
 
 ;--------------------- Global Declarations-------------------
 
 ;first pass of file execution - binds all functions and global variables to state
-(define S_globalPass
+(define S_methodPass
   (lambda (filename return)
     (S_globalDeclarationList (parser filename) (list '()) return)))
 
@@ -49,7 +70,7 @@
 ;process function binding
 (define S_bindFunction
   (lambda (f state return)
-    (V_makeClosure (params f) (body f) (name f) state
+    (V_makeFunctionClosure (params f) (body f) (name f) state
       (lambda (closure) 
         (S_addBinding (name f) closure state return)))))
 
@@ -73,7 +94,7 @@
 
 
 ;generate function closure
-(define V_makeClosure
+(define V_makeFunctionClosure
   (lambda (params body fname localState return)
     (return
      (list params body 
@@ -97,7 +118,6 @@
        (S_addBinding (car params) (car args) localState
          (lambda (updatedState)
            (S_bindParamsToArgs (cdr params) (cdr args) updatedState return)))))))
-
 
 ;--------------------- Function Execution-------------------
 ;abstraction to get formal params from function closure - currently not needed
