@@ -7,30 +7,11 @@
 
 
 ;main function of the program
-;(define interpret
-;  (lambda (filename)
-;    (S_methodPass filename (lambda (globalState)   ;this should call classPass
-;                             (V_callFunction 'main '() globalState (lambda (v) v) #f)))))  ;call main function on the state compiled by global pass
-
 (define interpret
-  (λ (filename className)
-    ;; 1) bind all the classes
-    (S_classPass filename
-      (λ (classState)
-        ;; 2) look up the requested class’s closure
-        (V_get className classState
-          (λ (cc)
-            ;; cc is a list: (parent instState)
-            (let ((instState  (cdar cc)))
-              ;; 3) invoke its `main` in that instance‐state
-              (V_callFunction 'main
-                              '()           ; no args
-                              instState    ; the state holding that class’s vars & methods
-                              (λ (v) v)    ; identity continuation
-                              #f))
-            ))
-           ))))     ; no throw‐k
-    
+  (lambda (filename)
+    (S_methodPass filename (lambda (globalState)   ;this should call classPass
+                             (V_callFunction 'main '() globalState (lambda (v) v) #f)))))  ;call main function on the state compiled by global pass
+
 ;----------------------Global Class Pass------------------
 
 ;1. define S_classPass
@@ -43,57 +24,7 @@
 ;3. define bindClass
      ;this should create class binding, will need to call createClassClosure
 
-(define S_classPass
-  (lambda (filename return)
-    (S_classDeclarationList (parser filename)
-                            '(())      ; <- start empty
-                            return)))
-
-(define S_classDeclarationList
-  (lambda (decls state return)
-    (if (null? decls)
-        (return state)
-        (let ((d (car decls)))
-          (if (and (list? d) (eq? (car d) 'class))
-              (classDeclarationEval d state
-                (lambda (st)
-                  (S_classDeclarationList (cdr decls) st return)))
-              (S_classDeclarationList (cdr decls) state return))))))
-
-(define classDeclarationEval
-  (lambda (classAST state return)
-    (bindClass classAST state return)))
-
-(define bindClass
-  (lambda (classAST state return)
-    (createClassClosure
-      classAST
-      '()                    ; ← fresh state for *this* class’s members
-      (lambda (raw-cc)
-        (S_addBinding
-         (cadr classAST)     ; bind under the class’s own name
-         raw-cc              ; the closure you just built
-         state               ; the *global* class‐pass state
-         return))))) 
-
 ;-----------------------Class Closures--------------------------
-
-(define createClassClosure
-  (lambda (class-body state return)
-    ;; a class‐closure is just a list:
-    ;;   '(class parent (list inst-fields inst-methods))
-    (return (getParentName class-body (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1) v2)))))))))
-
-(define getParentName
-  (lambda (class-body return) (return (cadr (caddr class-body)))))
-
-(define getInstFieldsAndMethods
-  (lambda (body state return)
-    (cond
-      ((null? body) state)
-      (else (S_globalDeclarationEval (car body) state (lambda (s)
-                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
-
 
 ;4. define createClassClosure
       ; class closure should contain:
@@ -127,7 +58,6 @@
     (cond
       ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return #f))
       ((eq? (dclrType declaration) 'function) (S_bindFunction (dclrBody declaration) state return))
-      (else (return state))
       )))
 
 ;abstraction for function name
