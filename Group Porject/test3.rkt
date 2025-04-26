@@ -1,6 +1,6 @@
 #lang racket
 (require "Interpreter.rkt")
-(require "functionParser.rkt")
+(require "classParser.rkt")
 
 (define mpa_error "ERROR (Mismatched parameters and arguments)")
 (define oos_error "ERROR (Out of scope)")
@@ -34,7 +34,7 @@
         (displayln "No expected result for custom test"))
 
     (displayln "Interpreter Result: ")
-    (displayln(interpret testfile))
+    (displayln(interpret testfile 'A)) ;class will always be A
 
     (displayln "Run another test? (y/n)")
     (if (not (eq? (read) 'y))

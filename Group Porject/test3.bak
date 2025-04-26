@@ -1,11 +1,11 @@
 #lang racket
 (require "Interpreter.rkt")
-(require "simpleParser.rkt")
+(require "functionParser.rkt")
 
-(define ubd_error "ERROR (Usage before declaring)")
-(define uba_error "ERROR (Usage before assignment)")
+(define mpa_error "ERROR (Mismatched parameters and arguments)")
+(define oos_error "ERROR (Out of scope)")
 (define ubr_error "ERROR (redeclaration)")
-(define result_list (list 20 164 32 2 ubd_error 25 21 6 -1 789 ubd_error ubd_error uba_error 12 125 110 2000400 101 ubd_error))
+(define result_list (list 10 14 45 55 1 115 'true 20 24 2 35 mpa_error 90 69 87 64 oos_error 125 100 2000400 3421 20332 21))
 
 (define dotest #t)
 (define testnumstring "")
@@ -22,7 +22,7 @@
       ((< testnum 10) (set! testnumstring (string-append "0" (number->string testnum))))
       (else (set! testnumstring (number->string testnum))))
 
-    (set! testfile (string-append "tests2/test" testnumstring ".txt"))
+    (set! testfile (string-append "tests3/test" testnumstring ".txt"))
 
     (displayln "Parser Result: ")
     (displayln (parser testfile))
@@ -34,7 +34,7 @@
         (displayln "No expected result for custom test"))
 
     (displayln "Interpreter Result: ")
-    (displayln(interpret testfile))
+    (displayln(interpret testfile 'A))    ;A will always be the container class
 
     (displayln "Run another test? (y/n)")
     (if (not (eq? (read) 'y))

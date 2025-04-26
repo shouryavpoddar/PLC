@@ -1,3 +1,5 @@
+class A{
+
 function main() {
   var x = 10;
   var y = 20;
@@ -11,4 +13,6 @@ function main() {
   if (min > z)
     min = z;
   return min;
+}
+
 }

@@ -1,40 +1,15 @@
-class A extends K {
-function f(n) {
-  var a;
-  var b;
-  var c;
-
-  a = 2 * n;
-  b = n - 10;
-
-  function g(x) {
-    var a;
-    a = x + 1;
-    b = 100;
-    return a;
-  }
-
-  if (b == 0)
-    c = g(a);
-  else
-    c = a / b;
-  return a + b + c;
+class A {
+function fib(a) {
+  if (a == 0)
+    return 0;
+  else if (a == 1)
+    return 1;
+  else 
+    return fib(a-1) + fib(a-2);
 }
 
 function main() {
-  var x = f(10);
-  var y = f(20);
-
-  return x - y;
+  return fib(10);
 }
 
 }
-
-class C extends B {
-var x = 5;
-
- function main() {
-    return 6;
-  }
-}
-

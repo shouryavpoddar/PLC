@@ -82,10 +82,13 @@
   (lambda (class-body state return)
     ;; a class‐closure is just a list:
     ;;   '(class parent (list inst-fields inst-methods))
-    (return (getParentName class-body (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
+    (return (getParentName (caddr class-body) (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
 
 (define getParentName
-  (lambda (class-body return) (return (cadr (caddr class-body)))))
+  (lambda (class-info return)
+    (if (null? class-info)         
+        (return '())          ;if no parent class
+        (return (cadr (caddr class-info))))))
 
 (define getInstFieldsAndMethods
   (lambda (body state return)
@@ -478,7 +481,7 @@
   (lambda (name val state return)
     (S_replaceBinding* name val state
       (lambda (new-state)
-        (remove-updated-cps new-state return)))))
+        (remove-updated-cps new-state return)))))   ;in case of uncaught updated flag lingering in state
 
 (define remove-updated-cps
   (lambda (lst return)
@@ -512,14 +515,14 @@
     (cond
       ((null? state) (return '()))
       ((and (list? (car state)) (or (null? (car state)) (list? (caar state))))
-            (S_replaceBinding name val (car state) (lambda (v1)
+            (S_replaceBinding* name val (car state) (lambda (v1)
                                                     (if (and (pair? v1) (eq? (car v1) 'updated))  ;check if this created the update
                                                          (return (cons (cdr v1) (cdr state)))    ;if so, stop calling S_replaceBinding on cdr and return updated state (with flag removed)
-                                                         (S_replaceBinding name val (cdr state) (lambda (v2)
+                                                         (S_replaceBinding* name val (cdr state) (lambda (v2)
                                                                                                       (return (cons v1 v2))))))))
       ((eq? name (caar state)) (return (begin (set-box! (cadar state) val) (cons 'updated (cons (list name (cadar state)) (cdr state)))))) ;add 'updated flag so we know to stop recursing
 
-      (else (S_replaceBinding name val (cdr state) (lambda (rest)
+      (else (S_replaceBinding* name val (cdr state) (lambda (rest)
                                                      (if (and (pair? rest) (eq? (car rest) 'updated))  ;check if we processed the update
                                                               (return (cons 'updated (cons (car state) (cdr rest))))   ;if we processed update, move flag to front of returned state segment
                                                               (return (cons (car state) rest)))))))

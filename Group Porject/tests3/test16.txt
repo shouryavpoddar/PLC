@@ -1,3 +1,4 @@
+class A {
 function main() {
   var result;
   var base;
@@ -24,4 +25,5 @@ function main() {
   base = 2;
   getpow(6);
   return result;
+}
 }
