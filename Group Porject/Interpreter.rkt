@@ -13,20 +13,20 @@
 ;                             (V_callFunction 'main '() globalState (lambda (v) v) #f)))))  ;call main function on the state compiled by global pass
 
 (define interpret
-  (λ (filename className)
+  (lambda (filename className)
     ;; 1) bind all the classes
     (S_classPass filename
-      (λ (classState)
+      (lambda (classState)
         ;; 2) look up the requested class’s closure
         (V_get className classState
-          (λ (cc)
+          (lambda (cc)
             ;; cc is a list: (parent instState)
             (let ((instState  (cdar cc)))
               ;; 3) invoke its `main` in that instance‐state
               (V_callFunction 'main
                               '()           ; no args
                               instState    ; the state holding that class’s vars & methods
-                              (λ (v) v)    ; identity continuation
+                              (lambda (v) v)    ; identity continuation
                               #f))
             ))
            ))))     ; no throw‐k
@@ -82,7 +82,7 @@
   (lambda (class-body state return)
     ;; a class‐closure is just a list:
     ;;   '(class parent (list inst-fields inst-methods))
-    (return (getParentName class-body (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1) v2)))))))))
+    (return (getParentName class-body (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
 
 (define getParentName
   (lambda (class-body return) (return (cadr (caddr class-body)))))
@@ -222,13 +222,14 @@
   (lambda (name frame)
     (cond
       ((null? frame) #f)
-      ((eq? name (caar frame)) #t)
+      ((or (eq? name (car frame)) (and (list? (car frame))(eq? name (caar frame)))) #t)
       (else (V_declaredInFrame? name (cdr frame))))))
 
 (define V_searchFrame
   (lambda (name bindings return)
     (cond
       ((null? bindings) (error "Should not happen: variable declared but binding not found"))
+      ((eq? name (car bindings)) (return (cadr bindings))); foun
       ((eq? name (caar bindings)) (return (cadar bindings))) ; found it!
       (else (V_searchFrame name (cdr bindings) return)))))
 
@@ -266,7 +267,7 @@
      (call/cc
       (lambda (exit)
         (S_codeBlockStatement (cBody closure)
-                              ((cEnvFunction closure) args closure (lambda (v) v))
+                               ((cEnvFunction closure) args closure (lambda (v) v))
                               (lambda (v) v)
                               exit #f #f throw-k))))))  ;call statement list on body of function
 
@@ -473,8 +474,40 @@
 ; Sample State ((x 10) (y 9) (z true))
 ; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
 
-;update a binding without changing order of state
 (define S_replaceBinding
+  (lambda (name val state return)
+    (S_replaceBinding* name val state
+      (lambda (new-state)
+        (remove-updated-cps new-state return)))))
+
+(define remove-updated-cps
+  (lambda (lst return)
+    (cond
+      ;; 1) empty list → pass ’() to the continuation
+      [(null? lst)
+       (return '())]
+
+      ;; 2) head is ’updated → skip it, recurse on the tail with the same continuation
+      [(eq? (car lst) 'updated)
+       (remove-updated-cps (cdr lst) return)]
+
+      ;; 3) head is a sublist → clean it first, then clean the tail,
+      ;;    and finally cons the two results
+      [(pair? (car lst))
+       (remove-updated-cps (car lst)
+         (lambda (clean-head)
+           (remove-updated-cps (cdr lst)
+             (lambda (clean-tail)
+               (return (cons clean-head clean-tail))))))]
+
+      ;; 4) any other element → keep it, recurse on tail, then cons
+      [else
+       (remove-updated-cps (cdr lst)
+         (lambda (clean-tail)
+           (return (cons (car lst) clean-tail))))])))
+
+;update a binding without changing order of state
+(define S_replaceBinding*
   (lambda (name val state return)
     (cond
       ((null? state) (return '()))
