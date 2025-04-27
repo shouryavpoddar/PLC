@@ -112,22 +112,55 @@
         (return (cadr (caddr class-info))))))
 
 ;not currently being used
-(define getInstFieldsAndMethods
-  (lambda (body state return)
-    (cond
-      ((null? body) state)
-      (else (S_classInternalDeclarationEval (car body) state (lambda (s)
-                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
+;(define getInstFieldsAndMethods
+;  (lambda (body state return)
+;    (cond
+;      ((null? body) state)
+;      (else (S_classInternalDeclarationEval (car body) state (lambda (s)
+;                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
 
+
+;-----------------------Instance Closure------------------------------
+
+;(((B #&(() ((foo #&(() ((= x (+ x 1))) FUNCTION)) (z #&2) (x #&10)))) (A #&(() ((main #&(() ((funcall setx 5) (funcall sety 7) (return (* x y))) FUNCTION)) (sety #&((b) ((= y b)) FUNCTION)) (setx #&((a) ((= x a)) FUNCTION)) (y #&0) (x #&0))))))
+
+;(B #&(() ((foo #&(() ((= x (+ x 1))) #<procedure:...ect/Interpreter.rkt:223:11>)) (z #&2) (x #&10))))
+
+(define fieldAndMethodList cadr)
+
+;should have a) runtimeType, b) values of all fields
+(define V_makeInstanceClosure
+  (lambda (classClosure return)
+    (V_getInstanceFieldValues (fieldAndMethodList classClosure) (lambda (values)  ;initial values from class closure
+                                                                  (return (list classClosure values))))))   ;initialize runTimeType = compileTimeType - polymophism may reassign this later
+
+
+
+;extract list of instance field values 
+(define V_getInstanceFieldValues
+  (lambda (declarationList return)
+    (cond
+      ((null? declarationList) (return '()))
+      ((list? (unbox (cadar declarationList))) (V_getInstanceFieldValues (cdr declarationList) return))   ;if value was list, this was a function
+      (else (V_getInstanceFieldValues (cdr declarationList) (lambda (cdrValues)
+                                                              (V_copyVar (car declarationList) (lambda (copiedCar)
+                                                                                                 (return (cons copiedCar cdrValues)))))))
+      )))
+
+;helper to copy variables when getting instance fields so as to not reference boxes in class closure
+(define V_copyVar
+  (lambda (referencedVar return)
+    (return (cons (car referencedVar) (list (box (unbox (cadr referencedVar))))))))
+    
 
 
 ;--------------------- Class Internal Declarations-------------------
 
 ;first pass of file execution - binds all functions and class variables and methods to state
 ;not currenlty being used
-(define S_methodPass
-  (lambda (filename return)
-    (S_classInternalDeclarationList (parser filename) (list '()) return)))
+;(define S_methodPass
+;  (lambda (filename return)
+;    (S_classInternalDeclarationList (parser filename) (list '()) return)))
 
 ;top level of global declarations - runs global declarations in declaration list in order
 (define S_classInternalDeclarationList
@@ -159,10 +192,10 @@
 ;abstraction for body of function
 (define body caddr)
 
-;process function binding
+;process method binding
 (define S_bindFunction
   (lambda (f state return)
-    (V_makeFunctionClosure (params f) (body f) (name f) state
+    (V_makeMethodClosure (params f) (body f) (name f) state
       (lambda (closure) 
         (S_addBinding (name f) closure state return)))))
 
@@ -185,15 +218,17 @@
           throw-k))))
 
 
-;generate function closure
-(define V_makeFunctionClosure
+;generate method closure
+(define V_makeMethodClosure
   (lambda (params body fname localState return)
     (return
      (list params body 
-           (lambda (args selfClosure closureReturn)
+           (lambda (args selfClosure closureReturn)     ;environment function
              (S_bindParamsToArgs params args localState
                (lambda (paramState)
-                 (S_addBinding fname selfClosure paramState closureReturn))))))))
+                 (S_addBinding fname selfClosure paramState closureReturn))))
+          ; (lambda clsName   TODO: add function to get compileTimeType
+           ))))
 
 ;helper to bind list of formal params to function arguments
 ;ASSUMPTION - params and args are same length

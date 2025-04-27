@@ -17,3 +17,12 @@ function main() {
 }
 }
 
+class B {
+var x = 10;
+var z = 2;
+
+function foo() {
+   x = x + 1;
+}
+}
+
