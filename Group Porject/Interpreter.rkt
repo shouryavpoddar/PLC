@@ -94,6 +94,8 @@
     ;;   '(class parent (list inst-fields inst-methods))
 ;    (return (getParentName (caddr class-body) (lambda(v1) (list (S_classInternalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
 
+(define className cadr)
+
 ;updated version of createClassClosure with fixed CPS
 (define createClassClosure
   (lambda (class-body state return)
@@ -101,7 +103,7 @@
       (lambda (parent)
         (S_classInternalDeclarationList (cadddr class-body) state
           (lambda (methAndVars)
-            (return (list parent methAndVars))))))))
+            (return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
 
 
 ;;make this parent closure for easy access
@@ -109,7 +111,7 @@
   (lambda (class-info return)
     (if (null? class-info)         
         (return '())          ;if no parent class
-        (return (cadr (caddr class-info))))))
+        (return (cadr class-info)))))
 
 ;not currently being used
 ;(define getInstFieldsAndMethods
@@ -201,32 +203,47 @@
 
 ; Process a variable declaration (var) by only looking at the top (current) block.
 (define S_declareAssign
-  (lambda (name exp state return throw-k)
+  (lambda (name exp state return throw-k)  ;exp could be numerical for var or (new A) for object
     (if (eq? exp 'undefined)
+        ;if variable not being assigned a value
         (V_declaredVarInCurrentBlock? name state
-          (lambda (declared?)
-            (if declared?
-                (S_replaceBindingInCurrentBlock name 'undefined state return)
-                (S_addBinding name 'undefined state return))))
-        (V_expressionEval exp state
-          (lambda (val)
-            (V_declaredVarInCurrentBlock? name state
-              (lambda (declared?)
-                (if declared?
-                    (S_replaceBindingInCurrentBlock name val state return)
-                    (S_addBinding name val state return)))))
-          throw-k))))
+                                      (lambda (declared?)
+                                        (if declared?
+                                            (S_replaceBindingInCurrentBlock name 'undefined state return)
+                                            (S_addBinding name 'undefined state return))))
+        ;if is being assigned a value
+        (V_declaredVarInCurrentBlock? name state
+                                     (lambda (declared?)   ;check if declared
+                                       (if (and (list? exp) (eq? (car exp) 'new))  ;check if expression or obejct
+                                           (V_get (cadr exp) state (lambda (clsClosure)  ;1. lookup class closure given name of class
+                                                                     (V_makeInstanceClosure clsClosure (lambda (instClosure)   ;2. call makeInstance closure on this ouptut
+                                                                                                         (if declared?
+                                                                                                             (S_replaceBindingInCurrentBlock name instClosure state return)
+                                                                                                             (S_addBinding name instClosure state return))))))
+                                           (V_expressionEval exp state     ;bind to ouptut of express
+                                                             (lambda (val)
+                                                               (if declared?
+                                                                   (S_replaceBindingInCurrentBlock name val state return)
+                                                                   (S_addBinding name val state return))) throw-k))
+                                       ))
+      )))
 
+
+;abstraction for getting class name from compile time type class closure
+(define clsName caddr)
 
 ;generate method closure
 (define V_makeMethodClosure
   (lambda (params body fname localState return)
     (return
      (list params body 
-           (lambda (args selfClosure closureReturn)     ;environment function
+           (lambda (args selfClosure cmplTimeType closureReturn)     ;environment function  ;EDIT - taking in compileTimeType to add that to env as well
              (S_bindParamsToArgs params args localState
                (lambda (paramState)
-                 (S_addBinding fname selfClosure paramState closureReturn))))
+                 (S_addBinding fname selfClosure paramState
+                               (lambda (methodClosureState)
+                                 (S_addBinding (clsName cmplTimeType) cmplTimeType methodClosureState closureReturn))  ;get name from class closure (cmplTimeType, bind to closure itself
+                                 ))))
           ; (lambda clsName   TODO: add function to get compileTimeType
            ))))
 
@@ -338,7 +355,7 @@
      (call/cc
       (lambda (exit)
         (S_codeBlockStatement (cBody closure)
-                               ((cEnvFunction closure) args closure (lambda (v) v))
+                               ((cEnvFunction closure) args closure cmplTimeType (lambda (v) v))
                               (lambda (v) v)
                               exit #f #f throw-k))))))  ;call statement list on body of function
 
