@@ -716,6 +716,10 @@
       ((eq? (car exp) 'funcall)
        (V_callFunction (fName exp) (fParams exp) state return throw-k)) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
                                                                             ;if this is the case, our exp goes from funCall -> obj.funCall. In this case, we should call our dot operator code from here, and that will extract the type to run V_callFunction
+                                                                                 ;a) look up obj in state to get its instance closure. This contains runTimeType and variable values
+                                                                                 ;b)callFunction by passing this=runTimeType, compileTimeType=?
+                                                                                       ;this is where I'm stuck. The compilTimeType is currently necessary to be able to pass the the environment function from method closure, but it is not contained in instance closure...?
+                                                                                 ; also, i"m not sure if anything needs to be done with variable from the instance values here. I don't thiiink thye need to be put in the state b/c the object that owns them is in state. I think for wehn we do variable assignments for variabels owned by objects that is whern we would use them
                                                                     ;**Maybe (see above first) TODO: params should now be name, args, state, this, compileTimeType, return throw-k
       )))
 
