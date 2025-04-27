@@ -19,17 +19,19 @@
       (lambda (classState)
         ;; 2) look up the requested class’s closure
         (V_get className classState
-          (lambda (cc)
+          (lambda (inputClassClosure)           
             ;; cc is a list: (parent instState)
-            (let ((instState  (cdar cc)))
+            ;(let ((instState  (cadr inputClassClosure)))     ;we should not do this - instead, pass whole closure as compileTimeType
               ;; 3) invoke its `main` in that instance‐state
               (V_callFunction 'main
                               '()           ; no args
-                              instState    ; the state holding that class’s vars & methods
+                              classState    ; the state holding that class’s vars & methods
+                              '()           ;null reference to 'this' b/c main is static
+                              inputClassClosure     ;the compile time type
                               (lambda (v) v)    ; identity continuation
                               #f))
             ))
-           ))))     ; no throw‐k
+           )))     ; no throw‐k
     
 ;----------------------Global Class Pass------------------
 
@@ -78,25 +80,6 @@
 
 ;-----------------------Class Closures--------------------------
 
-(define createClassClosure
-  (lambda (class-body state return)
-    ;; a class‐closure is just a list:
-    ;;   '(class parent (list inst-fields inst-methods))
-    (return (getParentName (caddr class-body) (lambda(v1) (list (S_globalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
-
-(define getParentName
-  (lambda (class-info return)
-    (if (null? class-info)         
-        (return '())          ;if no parent class
-        (return (cadr (caddr class-info))))))
-
-(define getInstFieldsAndMethods
-  (lambda (body state return)
-    (cond
-      ((null? body) state)
-      (else (S_globalDeclarationEval (car body) state (lambda (s)
-                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
-
 
 ;4. define createClassClosure
       ; class closure should contain:
@@ -105,32 +88,68 @@
          ;c) list of method names and their closures
          ;      - doing this will likely require calling S_methodPass (adjusted) inside the class
 
-;--------------------- Global Declarations-------------------
+;(define createClassClosure
+;  (lambda (class-body state return)
+    ;; a class‐closure is just a list:
+    ;;   '(class parent (list inst-fields inst-methods))
+;    (return (getParentName (caddr class-body) (lambda(v1) (list (S_classInternalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
 
-;first pass of file execution - binds all functions and global variables to state
+;updated version of createClassClosure with fixed CPS
+(define createClassClosure
+  (lambda (class-body state return)
+    (getParentName (caddr class-body)
+      (lambda (parent)
+        (S_classInternalDeclarationList (cadddr class-body) state
+          (lambda (methAndVars)
+            (return (list parent methAndVars))))))))
+
+
+;;make this parent closure for easy access
+(define getParentName
+  (lambda (class-info return)
+    (if (null? class-info)         
+        (return '())          ;if no parent class
+        (return (cadr (caddr class-info))))))
+
+;not currently being used
+(define getInstFieldsAndMethods
+  (lambda (body state return)
+    (cond
+      ((null? body) state)
+      (else (S_classInternalDeclarationEval (car body) state (lambda (s)
+                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
+
+
+
+;--------------------- Class Internal Declarations-------------------
+
+;first pass of file execution - binds all functions and class variables and methods to state
+;not currenlty being used
 (define S_methodPass
   (lambda (filename return)
-    (S_globalDeclarationList (parser filename) (list '()) return)))
+    (S_classInternalDeclarationList (parser filename) (list '()) return)))
 
 ;top level of global declarations - runs global declarations in declaration list in order
-(define S_globalDeclarationList
+(define S_classInternalDeclarationList
   (lambda (lst state return)
     (cond
       ((null? lst) (return state))
-      (else (S_globalDeclarationEval (car lst) state (lambda (s)
-                                                       (S_globalDeclarationList (cdr lst) s return)))))))
+      (else (S_classInternalDeclarationEval (car lst) state (lambda (s)
+                                                       (S_classInternalDeclarationList (cdr lst) s return)))))))
 
 ;abstraction for declare type
 (define dclrType car)
 (define dclrBody cdr)
 
-;processes individual global declaration
-(define S_globalDeclarationEval
+;processes individual class internal declaration
+(define S_classInternalDeclarationEval
   (lambda (declaration state return)
     (cond
+      ((or (eq? (dclrType declaration) 'function) (eq? (dclrType declaration) 'static-function))
+       (S_bindFunction (dclrBody declaration) state return))
       ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return #f))
-      ((eq? (dclrType declaration) 'function) (S_bindFunction (dclrBody declaration) state return))
       (else (return state))
+      ;todo - nested classes?
       )))
 
 ;abstraction for function name
@@ -200,14 +219,28 @@
 ;abstraction to get environment from function closure
 (define cEnvFunction caddr)
 
+;get runtime type from instance closure
+(define runTimeType car)
+
 ;calls a function and returns its output value or nothing
 (define V_callFunction
-  (lambda (fname argExpressions state return throw-k)
-    (V_get fname state 
-      (lambda (closure)
-        (V_evaluateArgs argExpressions state 
-          (lambda (args)
-            (V_evaluateFunction args closure state return throw-k)) throw-k)))))
+  (lambda (fname argExpressions state this cmplTimeType return throw-k)
+    ;1. get object calling method on (this) - recall this is an instance closure, which has: a) type, b)instance field value
+    ;2. get runtime type of this
+    (if (null? this)
+        (V_get fname cmplTimeType    ;if calling static (for main)
+               (lambda (closure)
+                 (V_evaluateArgs argExpressions state ;I think we eval in this state..?
+                                 (lambda (args)
+                                   (V_evaluateFunction args closure state cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
+ 
+        (V_get fname (runTimeType this)     ;3. get method closure from runtimeType (change from state)
+               (lambda (closure)
+                 (V_evaluateArgs argExpressions state ;I think we eval in this state..?
+                                 (lambda (args)
+                                   (V_evaluateFunction args closure state cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
+        )))
+    
 
 ;helper to evaluate method arguments expressions and return list of their values
 (define V_evaluateArgs
@@ -265,7 +298,7 @@
 
 ;evaluates a function given its closure - helper
 (define V_evaluateFunction
-  (lambda (args closure state return throw-k)
+  (lambda (args closure state cmplTimeType return throw-k)   ;compileTimeType passed but not used for now...
     (return 
      (call/cc
       (lambda (exit)
@@ -629,7 +662,9 @@
          throw-k))
       ; Function call:
       ((eq? (car exp) 'funcall)
-       (V_callFunction (fName exp) (fParams exp) state return throw-k))
+       (V_callFunction (fName exp) (fParams exp) state return throw-k)) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
+                                                                            ;if this is the case, our exp goes from funCall -> obj.funCall. In this case, we should call our dot operator code from here, and that will extract the type to run V_callFunction
+                                                                    ;**Maybe (see above first) TODO: params should now be name, args, state, this, compileTimeType, return throw-k
       )))
 
 ;evaluate equality 
