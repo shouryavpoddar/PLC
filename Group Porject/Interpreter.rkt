@@ -99,11 +99,14 @@
 ;updated version of createClassClosure with fixed CPS
 (define createClassClosure
   (lambda (class-body state return)
-    (getParentName (caddr class-body)
+    (getParentName (caddr class-body)  ;TODO - change this to get whole parent's closure, or at least it's methAndVars - we will append this to our current methAndVars to support polymorphism
       (lambda (parent)
         (S_classInternalDeclarationList (cadddr class-body) state
           (lambda (methAndVars)
-            (return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
+            ;(return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
+            (return (list methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
+
+;TODO - take parent name out of front of list (this will change list ordering, so refactor everywhere that has references into class closures
 
 
 ;;make this parent closure for easy access
@@ -124,11 +127,8 @@
 
 ;-----------------------Instance Closure------------------------------
 
-;(((B #&(() ((foo #&(() ((= x (+ x 1))) FUNCTION)) (z #&2) (x #&10)))) (A #&(() ((main #&(() ((funcall setx 5) (funcall sety 7) (return (* x y))) FUNCTION)) (sety #&((b) ((= y b)) FUNCTION)) (setx #&((a) ((= x a)) FUNCTION)) (y #&0) (x #&0))))))
 
-;(B #&(() ((foo #&(() ((= x (+ x 1))) #<procedure:...ect/Interpreter.rkt:223:11>)) (z #&2) (x #&10))))
-
-(define fieldAndMethodList cadr)
+(define fieldAndMethodList car)    ;(define fieldAndMethodList cadr)
 
 ;should have a) runtimeType, b) compiletimeType c) values of all fields    - instructions say compiletimeType should be manually passed everywhere, but tbh this seems easier
 (define V_makeInstanceClosure
@@ -230,7 +230,7 @@
 
 
 ;abstraction for getting class name from compile time type class closure
-(define clsName caddr)
+(define clsName cadr);(define clsName caddr)
 
 ;generate method closure
 (define V_makeMethodClosure
@@ -530,10 +530,10 @@
 
 
 ;--------------------------- Assigment --------------------------------
-(define assignValue cadr)
-(define dotFieldName caddar)
-(define varList (compose car cddadr))
-(define thisName car)
+;(define assignValue cadr)
+;(define dotFieldName caddar)
+;(define varList (compose car cddadr))
+;(define thisName car)
 
 ;handle assignment statement
 (define S_assignStatement
