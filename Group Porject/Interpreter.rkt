@@ -130,12 +130,12 @@
 
 (define fieldAndMethodList cadr)
 
-;should have a) runtimeType, b) values of all fields
+;should have a) runtimeType, b) compiletimeType c) values of all fields    - instructions say compiletimeType should be manually passed everywhere, but tbh this seems easier
 (define V_makeInstanceClosure
   (lambda (classClosure return)
     (V_getInstanceFieldValues (fieldAndMethodList classClosure) (lambda (values)  ;initial values from class closure
-                                                                  (return (list classClosure values))))))   ;initialize runTimeType = compileTimeType - polymophism may reassign this later
-
+                                                                  (return (list classClosure classClosure values))))))   ;initialize runTimeType = compileTimeType - polymophism may reassign this later
+                                                                                    ;yes, runTimeType and compileTimeType are same rn - if it gets polymorphic then runTimeType will change - compile will always stay same
 
 
 ;extract list of instance field values 
@@ -389,7 +389,7 @@
       ((eq? (stmtType statement) 'return)
        (V_returnStatement (stmtBody statement) state exit throw-k))
       ((eq? (stmtType statement) 'funcall)
-       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))
+       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))   ;TODO - may need different fName, fParams
       ;; NEW clause: Nested function declaration
       ((eq? (stmtType statement) 'function)
        (S_bindFunction (stmtBody statement) state return))
@@ -670,6 +670,18 @@
 
 
 ; ------------------- Expression Evalutation -------------------------
+;get compile time type (second item) from instance closure
+(define cmpTimeType cadr)
+;get varValues (third item) from instance closure)
+(define varValues caddr)
+;get left side of dot expression
+(define dotLeft cadadr)
+;get name of function in expression
+(define funName (compose car cddadr))
+;get name for dot expression variable val
+(define dotName cadr)
+;get name for var when dot for variable eval
+(define varName caddr)
 
 ;evaluate value of an expression - also evaluates functions since they return values
 (define V_expressionEval
@@ -714,14 +726,30 @@
          throw-k))
       ; Function call:
       ((eq? (car exp) 'funcall)
-       (V_callFunction (fName exp) (fParams exp) state return throw-k)) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
+       (V_dotEval (dotLeft exp) state (lambda (instClosure)  
+                                  (V_callFunction (funName exp) (fParams exp) state instClosure (cmpTimeType instClosure) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
                                                                             ;if this is the case, our exp goes from funCall -> obj.funCall. In this case, we should call our dot operator code from here, and that will extract the type to run V_callFunction
                                                                                  ;a) look up obj in state to get its instance closure. This contains runTimeType and variable values
                                                                                  ;b)callFunction by passing this=runTimeType, compileTimeType=?
                                                                                        ;this is where I'm stuck. The compilTimeType is currently necessary to be able to pass the the environment function from method closure, but it is not contained in instance closure...?
                                                                                  ; also, i"m not sure if anything needs to be done with variable from the instance values here. I don't thiiink thye need to be put in the state b/c the object that owns them is in state. I think for wehn we do variable assignments for variabels owned by objects that is whern we would use them
                                                                     ;**Maybe (see above first) TODO: params should now be name, args, state, this, compileTimeType, return throw-k
+      ;eval (dot obj varName), NOT for function calls
+      ;1. get left of dot expression (an instance closure)
+      ;2. lookup the third param in instance closure vars list
+      ((eq? (car exp) 'dot)
+       (V_dotEval (dotName exp) state (lambda (instClosure)
+                                     (V_get (varName exp) (varValues instClosure) return))))
       )))
+
+;helper to evaluate left side of dot expression --> returns instance closure
+(define V_dotEval
+  (lambda (leftObj state return)
+    (if (list? leftObj)
+        (V_get (cadr leftObj) state (lambda (cmpTimeType)   ;1. get class closure of class type from state
+                                            (V_makeInstanceClosure cmpTimeType return)))   ;2. return instance closure (note not stored in state - this is temp)
+        (V_get leftObj state return)
+        )))
 
 ;evaluate equality 
 (define V_eql
