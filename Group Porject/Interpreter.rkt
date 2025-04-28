@@ -182,7 +182,7 @@
     (cond
       ((or (eq? (dclrType declaration) 'function) (eq? (dclrType declaration) 'static-function))
        (S_bindFunction (dclrBody declaration) state return))
-      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state return #f))
+      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) #f state return #f))   ;passing #f as 'this' for now - CHANGE THIS LATER if we start binding var declarations to their pre-evaluated expressions and not values
       (else (return state))
       ;todo - nested classes?
       )))
@@ -203,7 +203,7 @@
 
 ; Process a variable declaration (var) by only looking at the top (current) block.
 (define S_declareAssign
-  (lambda (name exp state return throw-k)  ;exp could be numerical for var or (new A) for object
+  (lambda (name exp state this return throw-k)  ;exp could be numerical for var or (new A) for object
     (if (eq? exp 'undefined)
         ;if variable not being assigned a value
         (V_declaredVarInCurrentBlock? name state
@@ -220,7 +220,7 @@
                                                                                                          (if declared?
                                                                                                              (S_replaceBindingInCurrentBlock name instClosure state return)
                                                                                                              (S_addBinding name instClosure state return))))))
-                                           (V_expressionEval exp state     ;bind to ouptut of express
+                                           (V_expressionEval exp state this     ;bind to ouptut of express
                                                              (lambda (val)
                                                                (if declared?
                                                                    (S_replaceBindingInCurrentBlock name val state return)
@@ -282,27 +282,27 @@
     (if (null? this)
         (V_get fname cmplTimeType    ;if calling static (for main)
                (lambda (closure)
-                 (V_evaluateArgs argExpressions state ;I think we eval in this state..?
+                 (V_evaluateArgs argExpressions state this;I think we eval in this state..?
                                  (lambda (args)
-                                   (V_evaluateFunction args closure state cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
+                                   (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
  
         (V_get fname (runTimeType this)     ;3. get method closure from runtimeType (change from state)
                (lambda (closure)
-                 (V_evaluateArgs argExpressions state ;I think we eval in this state..?
+                 (V_evaluateArgs argExpressions state this;I think we eval in this state..?
                                  (lambda (args)
-                                   (V_evaluateFunction args closure state cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
+                                   (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
         )))
     
 
 ;helper to evaluate method arguments expressions and return list of their values
 (define V_evaluateArgs
-  (lambda (argExprs state return throw-k)
+  (lambda (argExprs state this return throw-k)
     (if (null? argExprs)
         (return '())
-        (V_expressionEval (car argExprs) state 
+        (V_expressionEval (car argExprs) state this
           (lambda (v1)
-            (V_evaluateArgs (cdr argExprs) state (lambda (v2)
-                                                   (return (cons v1 v2))) throw-k))
+            (V_evaluateArgs (cdr argExprs) state this (lambda (v2)
+                                                        (return (cons v1 v2))) throw-k))
           throw-k))))
 
 ; Check if a variable is declared in a single frame (the current block)
@@ -350,12 +350,13 @@
 
 ;evaluates a function given its closure - helper
 (define V_evaluateFunction
-  (lambda (args closure state cmplTimeType return throw-k)   ;compileTimeType passed but not used for now...
+  (lambda (args closure state this cmplTimeType return throw-k)   ;compileTimeType passed but not used for now...
     (return 
      (call/cc
       (lambda (exit)
         (S_codeBlockStatement (cBody closure)
                                ((cEnvFunction closure) args closure cmplTimeType (lambda (v) v))
+                               this
                               (lambda (v) v)
                               exit #f #f throw-k))))))  ;call statement list on body of function
 
@@ -364,13 +365,13 @@
 
 ;top level of line-by-line code execution- runs statements in statement list in order
 (define S_statementList
-  (lambda (lst state return exit break-k continue-k throw-k)
+  (lambda (lst state this return exit break-k continue-k throw-k)
     (cond
       ((null? lst) (return state))
-      (else (S_statementEval (car lst) state
-                           (lambda (s)
-                             (S_statementList (cdr lst) s return exit break-k continue-k throw-k))
-                           exit break-k continue-k throw-k)))))
+      (else (S_statementEval (car lst) state this
+                             (lambda (s)
+                               (S_statementList (cdr lst) s this return exit break-k continue-k throw-k))
+                             exit break-k continue-k throw-k)))))
 
 ;abstraction for statement type
 (define stmtType car)
@@ -384,34 +385,34 @@
 ;evaluates individual statement
 
 (define S_statementEval
-  (lambda (statement state return exit break-k continue-k throw-k)
+  (lambda (statement state this return exit break-k continue-k throw-k)
     (cond
       ((eq? (stmtType statement) 'return)
-       (V_returnStatement (stmtBody statement) state exit throw-k))
-      ((eq? (stmtType statement) 'funcall)
-       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))   ;TODO - may need different fName, fParams
+       (V_returnStatement (stmtBody statement) state this exit throw-k))
+      ((eq? (stmtType statement) 'funcall)     ;THIS MAY NOT ACTUALLY BE POSSIBLE ANYMORE - WOULD HAVE TO GO THROUGH DOT OPERATOR - need to do dot????
+       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))   ;TODO - may need different fName, fParams - WARNING - likely bugged, change to dot???
       ;; NEW clause: Nested function declaration
       ((eq? (stmtType statement) 'function)
-       (S_bindFunction (stmtBody statement) state return))
+       (S_bindFunction (stmtBody statement) state return))  ;no need to pass this... (I think)
       ((eq? (stmtType statement) 'var)
-       (declareStatement (stmtBody statement) state return throw-k))
+       (declareStatement (stmtBody statement) state this return throw-k))
       ((eq? (stmtType statement) '=)
-       (S_assignStatement (stmtBody statement) state return throw-k))
+       (S_assignStatement (stmtBody statement) state this return throw-k))
       ((eq? (stmtType statement) 'if)
-       (S_ifStatement (stmtBody statement) state return exit break-k continue-k throw-k))
+       (S_ifStatement (stmtBody statement) state this return exit break-k continue-k throw-k))
       ((eq? (stmtType statement) 'while)
-       (S_whileStatement (stmtBody statement) state return exit throw-k))
+       (S_whileStatement (stmtBody statement) state this return exit throw-k))
       ((eq? (stmtType statement) 'begin)
-       (S_codeBlockStatement (stmtBody statement) state return exit break-k continue-k throw-k))
+       (S_codeBlockStatement (stmtBody statement) state this return exit break-k continue-k throw-k)) 
       ((eq? (stmtType statement) 'break)
        (if break-k (break-k state) (error "'break' used outside of loop")))
       ((eq? (stmtType statement) 'continue)
        (if continue-k (continue-k state) (error "'continue' used outside of loop")))
       ((eq? (stmtType statement) 'throw)
-       (if throw-k (SV_throw (cadr statement) state throw-k)
+       (if throw-k (SV_throw (cadr statement) state this throw-k)   ;I think needs this here...?
            (error "'throw' used outside of try")))
       ((eq? (stmtType statement) 'try)
-       (S_tryCatchFinallyStatement (stmtBody statement) state return exit break-k continue-k throw-k))
+       (S_tryCatchFinallyStatement (stmtBody statement) state this return exit break-k continue-k throw-k))
       )))
       
 
@@ -419,16 +420,16 @@
 
 ;handle entering and exiting code blocks
 (define S_codeBlockStatement
-  (lambda (stmts state return exit break-k continue-k throw-k)
-    (S_statementList stmts (cons '() state)
+  (lambda (stmts state this return exit break-k continue-k throw-k)
+    (S_statementList stmts (cons '() state) this
       (lambda (v) (return (cdr v))) exit break-k continue-k throw-k)))
 
 
 ;--------------------- Throw Statement -------------------
 
 (define SV_throw
-  (lambda (value state throw-k)
-    (V_expressionEval value state (lambda (v) (throw-k state v)) throw-k)))
+  (lambda (value state this throw-k)
+    (V_expressionEval value state this (lambda (v) (throw-k state v)) throw-k)))
 
 ; In S_statementEval, handle throw as follows:
 
@@ -448,13 +449,13 @@
   (lambda (stmts) (caddr stmts)))  ; Returns the entire finally clause: (finally ((= x (+ x 100))))
 
 (define S_tryCatchFinallyStatement
-  (lambda (stmts state return exit break-k continue-k throw-k)
-    (S_statementList (try-block stmts) state
+  (lambda (stmts state this return exit break-k continue-k throw-k)
+    (S_statementList (try-block stmts) state this
       ;; Normal completion:
       (lambda (try-state)
         (if (has-finally? stmts)
             (S_statementList (cadr (finally-block stmts))
-                             try-state return exit break-k continue-k throw-k)
+                             try-state this return exit break-k continue-k throw-k)
             (return try-state)))
       exit break-k continue-k
       ;; Exception caught:
@@ -463,10 +464,11 @@
           (lambda (state-with-exn)
             (S_statementList (caddr (catch-block stmts))
                              state-with-exn
+                             this
                              (lambda (catch-state)
                                (if (has-finally? stmts)
                                    (S_statementList (cadr (finally-block stmts))
-                                                    catch-state return exit break-k continue-k throw-k)
+                                                    catch-state this return exit break-k continue-k throw-k)
                                    (return catch-state)))
                              exit break-k continue-k throw-k)))))))
 
@@ -474,19 +476,19 @@
 
 ;handle while loops
 (define S_whileStatement
-  (lambda (stmts state return exit throw-k)
+  (lambda (stmts state this return exit throw-k)
     (return (cdr (call/cc
      (lambda (break-k)
-       (V_expressionEval (car stmts) state (lambda (v)
-                                          (if v
-                                              (S_whileStatement stmts
-                                                             (cdr (call/cc
-                                                              (lambda (continue-k)
-                                                                (S_statementEval (cadr stmts) state (lambda (s) (S_whileStatement stmts s return exit throw-k)) exit break-k continue-k throw-k))))
-                                                             return exit throw-k)
-                               (return state))
-                           ) throw-k)
-     ))))
+       (V_expressionEval (car stmts) state this (lambda (v)
+                                                  (if v
+                                                      (S_whileStatement stmts
+                                                                        (cdr (call/cc
+                                                                              (lambda (continue-k)
+                                                                                (S_statementEval (cadr stmts) state this (lambda (s) (S_whileStatement stmts s return exit throw-k)) exit break-k continue-k throw-k))))
+                                                                        this return exit throw-k)
+                                                      (return state))
+                                                  ) throw-k)
+       ))))
     ))
 
 
@@ -495,21 +497,21 @@
 
 ;handle if statements
 (define S_ifStatement
-  (lambda (stmts state return exit break-k continue-k throw-k)
-    (V_expressionEval (car stmts) state
-                    (lambda (v)
-                      (if v
-                          (S_statementEval (cadr stmts) state return exit break-k continue-k throw-k)
-                          (if (null? (cddr stmts))
-                              (return state)
-                              (S_statementEval (caddr stmts) state return exit break-k continue-k throw-k)))) throw-k)))
+  (lambda (stmts state this return exit break-k continue-k throw-k)
+    (V_expressionEval (car stmts) state this
+                      (lambda (v)
+                        (if v
+                            (S_statementEval (cadr stmts) state this return exit break-k continue-k throw-k)
+                            (if (null? (cddr stmts))
+                                (return state)
+                                (S_statementEval (caddr stmts) state this return exit break-k continue-k throw-k)))) throw-k)))
 
 ;--------------------------- Return -----------------------------------
 
 ;handle returning
 (define V_returnStatement
-  (lambda (stmt state exit throw-k)
-    (V_expressionEval (car stmt) state
+  (lambda (stmt state this exit throw-k)
+    (V_expressionEval (car stmt) state this
                       (lambda (v)
                         (cond
                           ((eq? #t v) (exit 'true))
@@ -521,19 +523,19 @@
 
 ;handle declaration
 (define declareStatement
-  (lambda (statement state return throw-k)
+  (lambda (statement state this return throw-k)
     (if (null? (cdr statement))
-        (S_declareAssign (car statement) 'undefined state return throw-k)
-        (S_declareAssign (car statement) (cadr statement) state return throw-k))))
+        (S_declareAssign (car statement) 'undefined state this return throw-k)
+        (S_declareAssign (car statement) (cadr statement)  this state return throw-k))))
 
 
 ;--------------------------- Assigment --------------------------------
 
 ;handle assignment statement
 (define S_assignStatement
-  (lambda (stmt state return throw-k)
+  (lambda (stmt state this return throw-k)
     (if (V_declaredVar? (car stmt) state (lambda (v) v))
-        (S_assign (car stmt) (cadr stmt) state return throw-k)
+        (S_assign (car stmt) (cadr stmt) this state return throw-k)
         (error "variable not declared: " (car stmt)))))
 
 ;helper to check if variable declared
@@ -547,16 +549,16 @@
 
 ;function to do an assignmnet
 (define S_assign
-  (lambda (name exp state return throw-k)
+  (lambda (name exp this state return throw-k)
     (cond
       ((null? name)
        (return (error "No name given")))
-      (else (V_expressionEval exp state
-                    (lambda (val)
-                      (if (V_declaredVar? name state (lambda (v) v))
-                          (S_replaceBinding name val state return)
-                          (S_addBinding name val state return)))
-                    throw-k)))))
+      (else (V_expressionEval exp state this
+                              (lambda (val)
+                                (if (V_declaredVar? name state (lambda (v) v))
+                                    (S_replaceBinding name val state return)
+                                    (S_addBinding name val state return)))
+                              throw-k)))))
 
 ;--------------------------- State ------------------------------------
 ; Sample State ((x 10) (y 9) (z true))
@@ -685,7 +687,7 @@
 
 ;evaluate value of an expression - also evaluates functions since they return values
 (define V_expressionEval
-  (lambda (exp state return throw-k)
+  (lambda (exp state this return throw-k)
     (cond
       ((null? exp) (return null))
       ((number? exp) (return (exact-truncate exp)))
@@ -694,50 +696,44 @@
       ((symbol? exp) (V_get exp state (lambda (v) (return v))))
       ; Unary operations:
       ((and (list? exp) (and (eq? (car exp) '-) (null? (cddr exp))))
-       (V_expressionEval (cadr exp) state (lambda (v) (return (- v))) throw-k))
+       (V_expressionEval (cadr exp) state this (lambda (v) (return (- v))) throw-k))
       ((and (list? exp) (eq? (car exp) '!))
-       (V_expressionEval (cadr exp) state (lambda (v) (return (not v))) throw-k))
+       (V_expressionEval (cadr exp) state this (lambda (v) (return (not v))) throw-k))
       ; Multiply/divide/mod:
       ((and (list? exp) (or (eq? (car exp) '%)
                             (or (eq? (car exp) '*) (eq? (car exp) '/))))
-       (V_multi exp state return throw-k))
+       (V_multi exp state this return throw-k))
       ; Plus and minus:
       ((and (list? exp) (or (eq? (car exp) '+) (eq? (car exp) '-)))
-       (V_arith exp state return throw-k))
+       (V_arith exp state this return throw-k))
       ; Comparisons:
       ((or (eq? (car exp) '<)
            (or (eq? (car exp) '>)
                (or (eq? (car exp) '<=)
                    (eq? (car exp) '>=))))
-       (V_comp exp state return throw-k))
+       (V_comp exp state this return throw-k))
       ; Equality:
       ((and (list? exp) (or (eq? (car exp) '==) (eq? (car exp) '!=)))
-       (V_eql exp state return throw-k))
+       (V_eql exp state this return throw-k))
       ; And/Or:
       ((and (list? exp) (eq? (car exp) '&&))
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2) (return (and v1 v2))) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2) (return (and v1 v2))) throw-k))
          throw-k))
       ((and (list? exp) (eq? (car exp) '||))
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2) (return (or v1 v2))) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2) (return (or v1 v2))) throw-k))
          throw-k))
       ; Function call:
-      ((eq? (car exp) 'funcall)
+      ((eq? (car exp) 'funcall)   ;NOTE - NOW HAS ACCESS TO 'this'
        (V_dotEval (dotLeft exp) state (lambda (instClosure)  
                                   (V_callFunction (funName exp) (fParams exp) state instClosure (cmpTimeType instClosure) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
-                                                                            ;if this is the case, our exp goes from funCall -> obj.funCall. In this case, we should call our dot operator code from here, and that will extract the type to run V_callFunction
-                                                                                 ;a) look up obj in state to get its instance closure. This contains runTimeType and variable values
-                                                                                 ;b)callFunction by passing this=runTimeType, compileTimeType=?
-                                                                                       ;this is where I'm stuck. The compilTimeType is currently necessary to be able to pass the the environment function from method closure, but it is not contained in instance closure...?
-                                                                                 ; also, i"m not sure if anything needs to be done with variable from the instance values here. I don't thiiink thye need to be put in the state b/c the object that owns them is in state. I think for wehn we do variable assignments for variabels owned by objects that is whern we would use them
-                                                                    ;**Maybe (see above first) TODO: params should now be name, args, state, this, compileTimeType, return throw-k
       ;eval (dot obj varName), NOT for function calls
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
-      ((eq? (car exp) 'dot)
+      ((eq? (car exp) 'dot)         ;NOTE - NOW HAS ACCESS TO 'this
        (V_dotEval (dotName exp) state (lambda (instClosure)
                                      (V_get (varName exp) (varValues instClosure) return))))
       )))
@@ -753,53 +749,53 @@
 
 ;evaluate equality 
 (define V_eql
-  (lambda (exp state return throw-k)
+  (lambda (exp state this return throw-k)
     (cond
       ((eq? (car exp) '==)
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this 
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2)
-                                                   (return (eq? v1 v2))) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2)
+                                                      (return (eq? v1 v2))) throw-k))
          throw-k))
       (else
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this 
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2)
-                                                   (return (not (eq? v1 v2))) ) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2)
+                                                      (return (not (eq? v1 v2))) ) throw-k))
          throw-k)))))
 
 ;evaluate comparison
 (define V_comp
-  (lambda (exp state return throw-k)
+  (lambda (exp state this return throw-k)
     (cond
       ((eq? (car exp) '<)
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state
+           (V_expressionEval (caddr exp) state this
              (lambda (v2)
                (return (< v1 v2))) 
              throw-k))
          throw-k))
       ((eq? (car exp) '>)
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state
+           (V_expressionEval (caddr exp) state this
              (lambda (v2)
                (return (> v1 v2))) 
              throw-k))
          throw-k))
       ((eq? (car exp) '<=)
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state
+           (V_expressionEval (caddr exp) state this
              (lambda (v2)
                (return (<= v1 v2))) 
              throw-k))
          throw-k))
       (else
-       (V_expressionEval (cadr exp) state
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state
+           (V_expressionEval (caddr exp) state this
              (lambda (v2)
                (return (>= v1 v2))) 
              throw-k))
@@ -807,40 +803,40 @@
 
 ;evaulate multiplication
 (define V_multi
-  (lambda (exp state return throw-k)
+  (lambda (exp state this return throw-k)
     (cond
       ((eq? (car exp) '*)
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state 
+           (V_expressionEval (caddr exp) state this 
              (lambda (v2) (return (* v1 v2))) throw-k))
          throw-k))
       ((eq? (car exp) '%)
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state 
+           (V_expressionEval (caddr exp) state this
              (lambda (v2) (return (remainder v1 v2))) throw-k))
          throw-k))
       (else 
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state 
+           (V_expressionEval (caddr exp) state this
              (lambda (v2) (return (exact-truncate (/ v1 v2)))) throw-k))
          throw-k)))))
 
 ;evaluate arithmetic (+ -)
 (define V_arith
-  (lambda (exp state return throw-k)
+  (lambda (exp state this return throw-k)
     (cond
       ((eq? (car exp) '+)
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2)
-                                                   (return (+ v1 v2))) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2)
+                                                      (return (+ v1 v2))) throw-k))
          throw-k))
       (else
-       (V_expressionEval (cadr exp) state 
+       (V_expressionEval (cadr exp) state this 
          (lambda (v1)
-           (V_expressionEval (caddr exp) state (lambda (v2)
-                                                   (return (- v1 v2))) throw-k))
+           (V_expressionEval (caddr exp) state this (lambda (v2)
+                                                      (return (- v1 v2))) throw-k))
          throw-k)))))
