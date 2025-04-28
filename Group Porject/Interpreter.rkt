@@ -238,7 +238,7 @@
     (return
      (list params body 
            (lambda (args selfClosure cmplTimeType closureReturn)     ;environment function  ;EDIT - taking in compileTimeType to add that to env as well
-             (S_bindParamsToArgs params args localState
+             (S_bindParamsToArgs params args localState   ;TODO - maybe need to add 'this' in to state as a param
                (lambda (paramState)
                  (S_addBinding fname selfClosure paramState
                                (lambda (methodClosureState)
@@ -272,7 +272,7 @@
 (define cEnvFunction caddr)
 
 ;get runtime type from instance closure
-(define runTimeType car)
+(define runTimeType caadr)  ;...i think...
 
 ;calls a function and returns its output value or nothing
 (define V_callFunction
@@ -389,10 +389,10 @@
     (cond
       ((eq? (stmtType statement) 'return)
        (V_returnStatement (stmtBody statement) state this exit throw-k))
-      ((eq? (stmtType statement) 'funcall)     ;THIS MAY NOT ACTUALLY BE POSSIBLE ANYMORE - WOULD HAVE TO GO THROUGH DOT OPERATOR - need to do dot????
-       (V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))   ;TODO - may need different fName, fParams - WARNING - likely bugged, change to dot???
-      ;; NEW clause: Nested function declaration
-      ((eq? (stmtType statement) 'function)
+      ((eq? (stmtType statement) 'funcall)     ;just call expressionEval and let it handle this
+       (V_expressionEval statement state this (lambda (ignore) (return state)) throw-k))
+       ;(V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))  
+      ((eq? (stmtType statement) 'function)  ;nested function declaration
        (S_bindFunction (stmtBody statement) state return))  ;no need to pass this... (I think)
       ((eq? (stmtType statement) 'var)
        (declareStatement (stmtBody statement) state this return throw-k))
@@ -530,13 +530,23 @@
 
 
 ;--------------------------- Assigment --------------------------------
+(define assignValue cadr)
+(define dotFieldName caddar)
+(define varList (compose car cddadr))
+(define thisName car)
 
 ;handle assignment statement
 (define S_assignStatement
   (lambda (stmt state this return throw-k)
-    (if (V_declaredVar? (car stmt) state (lambda (v) v))
-        (S_assign (car stmt) (cadr stmt) this state return throw-k)
-        (error "variable not declared: " (car stmt)))))
+    (cond
+      ((and (list? (car stmt)) (V_declaredVar? (dotFieldName stmt) (varList this) (lambda (v) v))) ;check if an instance or local variable (could be smthn like x vs (dot this x)
+      ; (V_get (thisName this) state (lambda (thisInState)   ;lookup reference to this's object in state to update
+                            ;          (S_assign (dotFieldName stmt) (assignValue stmt) this (varList thisInState) return throw-k))))  ;I think thisInState will be a ref to the closure - THOUGHT - how is the closure in the 'this' we keep passing going to update?>???
+       (S_assign (dotFieldName stmt) (assignValue stmt) this state return throw-k))
+    ((V_declaredVar? (car stmt) state (lambda (v) v))  ;if was not a list then must be local var
+     (S_assign (car stmt) (assignValue stmt) this state return throw-k))
+    (else (error "variable not declared: " (car stmt)))
+    )))
 
 ;helper to check if variable declared
 (define V_declaredVar?
@@ -673,9 +683,9 @@
 
 ; ------------------- Expression Evalutation -------------------------
 ;get compile time type (second item) from instance closure
-(define cmpTimeType cadr)
+(define cmpTimeType cadadr) ;..I think..
 ;get varValues (third item) from instance closure)
-(define varValues caddr)
+(define varValues (compose car cddadr));caddr)
 ;get left side of dot expression
 (define dotLeft cadadr)
 ;get name of function in expression
@@ -727,15 +737,15 @@
            (V_expressionEval (caddr exp) state this (lambda (v2) (return (or v1 v2))) throw-k))
          throw-k))
       ; Function call:
-      ((eq? (car exp) 'funcall)   ;NOTE - NOW HAS ACCESS TO 'this'
-       (V_dotEval (dotLeft exp) state this (lambda (instClosure)  
-                                  (V_callFunction (funName exp) (fParams exp) state instClosure (cmpTimeType instClosure) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
+      ((eq? (car exp) 'funcall)  
+       (V_dotEval (dotLeft exp) state this (lambda (newThis)  
+                                  (V_callFunction (funName exp) (fParams exp) state newThis (cmpTimeType newThis) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
       ;eval (dot obj varName), NOT for function calls
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
       ((eq? (car exp) 'dot)         ;NOTE - NOW HAS ACCESS TO 'this
-       (V_dotEval (dotName exp) state this (lambda (instClosure)
-                                             (V_get (varName exp) (varValues instClosure) return))))
+       (V_dotEval (dotName exp) state this (lambda (newThis)
+                                             (V_get (varName exp) (varValues newThis) return))))
       )))
 
 ;helper to evaluate left side of dot expression --> returns instance closure
@@ -743,9 +753,11 @@
   (lambda (leftObj state this return)
     (cond
       ((list? leftObj) (V_get (cadr leftObj) state (lambda (cmpTimeType)   ;1. get class closure of class type from state
-                                                     (V_makeInstanceClosure cmpTimeType return))))   ;2. return instance closure (note not stored in state - this is temp)
+                                                     (V_makeInstanceClosure cmpTimeType (lambda (instClosure)
+                                                                            (return (list #f instClosure)))))))   ;2. return instance closure (note not stored in state - this is temp) - #f for first val in list b/c no name b/c not in state
       ((eq? 'this leftObj) (return this))
-      (else (V_get leftObj state return))
+      (else (V_get leftObj state (lambda (instClosure)
+                                   (return (list leftObj instClosure)))))  ;this in the form of a list (name, instanceClosure)
         )))
 
 ;evaluate equality 
