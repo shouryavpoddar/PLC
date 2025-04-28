@@ -182,7 +182,7 @@
     (cond
       ((or (eq? (dclrType declaration) 'function) (eq? (dclrType declaration) 'static-function))
        (S_bindFunction (dclrBody declaration) state return))
-      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) #f state return #f))   ;passing #f as 'this' for now - CHANGE THIS LATER if we start binding var declarations to their pre-evaluated expressions and not values
+      ((eq? (dclrType declaration) 'var)      (declareStatement (dclrBody declaration) state #f return #f))   ;passing #f as 'this' for now - CHANGE THIS LATER if we start binding var declarations to their pre-evaluated expressions and not values
       (else (return state))
       ;todo - nested classes?
       )))
@@ -526,7 +526,7 @@
   (lambda (statement state this return throw-k)
     (if (null? (cdr statement))
         (S_declareAssign (car statement) 'undefined state this return throw-k)
-        (S_declareAssign (car statement) (cadr statement)  this state return throw-k))))
+        (S_declareAssign (car statement) (cadr statement) state this return throw-k))))
 
 
 ;--------------------------- Assigment --------------------------------
@@ -728,23 +728,24 @@
          throw-k))
       ; Function call:
       ((eq? (car exp) 'funcall)   ;NOTE - NOW HAS ACCESS TO 'this'
-       (V_dotEval (dotLeft exp) state (lambda (instClosure)  
+       (V_dotEval (dotLeft exp) state this (lambda (instClosure)  
                                   (V_callFunction (funName exp) (fParams exp) state instClosure (cmpTimeType instClosure) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
       ;eval (dot obj varName), NOT for function calls
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
       ((eq? (car exp) 'dot)         ;NOTE - NOW HAS ACCESS TO 'this
-       (V_dotEval (dotName exp) state (lambda (instClosure)
-                                     (V_get (varName exp) (varValues instClosure) return))))
+       (V_dotEval (dotName exp) state this (lambda (instClosure)
+                                             (V_get (varName exp) (varValues instClosure) return))))
       )))
 
 ;helper to evaluate left side of dot expression --> returns instance closure
 (define V_dotEval
-  (lambda (leftObj state return)
-    (if (list? leftObj)
-        (V_get (cadr leftObj) state (lambda (cmpTimeType)   ;1. get class closure of class type from state
-                                            (V_makeInstanceClosure cmpTimeType return)))   ;2. return instance closure (note not stored in state - this is temp)
-        (V_get leftObj state return)
+  (lambda (leftObj state this return)
+    (cond
+      ((list? leftObj) (V_get (cadr leftObj) state (lambda (cmpTimeType)   ;1. get class closure of class type from state
+                                                     (V_makeInstanceClosure cmpTimeType return))))   ;2. return instance closure (note not stored in state - this is temp)
+      ((eq? 'this leftObj) (return this))
+      (else (V_get leftObj state return))
         )))
 
 ;evaluate equality 
