@@ -68,9 +68,9 @@
 
 (define bindClass
   (lambda (classAST state return)
-    (createClassClosure
+    (V_createClassClosure
       classAST
-      '()                    ; ← fresh state for *this* class’s members
+      state  ;'()       ;should pass in state to have access to classes declared above
       (lambda (raw-cc)
         (S_addBinding
          (cadr classAST)     ; bind under the class’s own name
@@ -97,16 +97,17 @@
 (define className cadr)
 
 ;updated version of createClassClosure with fixed CPS
-(define createClassClosure
+(define V_createClassClosure
   (lambda (class-body state return)
     (getParentName (caddr class-body)  ;TODO - change this to get whole parent's closure, or at least it's methAndVars - we will append this to our current methAndVars to support polymorphism
-      (lambda (parent)
-        (S_classInternalDeclarationList (cadddr class-body) state
-          (lambda (methAndVars)
-            ;(return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
-            (return (list methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
+      (lambda (parentName)
+        (getParentMethAndVars parentName state
+          (lambda (parentMethAndVars)
+            (V_classInternalDeclarationList (cadddr class-body) '();state   ;start internal declaration list with empty state list
+              (lambda (methAndVars)
+                ;(return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
+                (return (list (append methAndVars parentMethAndVars) (className class-body))))))))))) ;hard-code in the name of the class at the end of the class closure
 
-;TODO - take parent name out of front of list (this will change list ordering, so refactor everywhere that has references into class closures
 
 
 ;;make this parent closure for easy access
@@ -115,6 +116,14 @@
     (if (null? class-info)         
         (return '())          ;if no parent class
         (return (cadr class-info)))))
+
+;get the list of declared methods and variables in parent
+(define getParentMethAndVars
+  (lambda (parentName state return)
+    (if (null? parentName)
+        (return '())
+        (V_get parentName state (lambda (parentClosure)
+                                  (return (cons (list 'super (box 'reserved)) (car parentClosure))))))))
 
 ;not currently being used
 ;(define getInstFieldsAndMethods
@@ -165,12 +174,12 @@
 ;    (S_classInternalDeclarationList (parser filename) (list '()) return)))
 
 ;top level of global declarations - runs global declarations in declaration list in order
-(define S_classInternalDeclarationList
+(define V_classInternalDeclarationList
   (lambda (lst state return)
     (cond
       ((null? lst) (return state))
       (else (S_classInternalDeclarationEval (car lst) state (lambda (s)
-                                                       (S_classInternalDeclarationList (cdr lst) s return)))))))
+                                                       (V_classInternalDeclarationList (cdr lst) s return)))))))
 
 ;abstraction for declare type
 (define dclrType car)
@@ -773,6 +782,7 @@
                                                      (V_makeInstanceClosure cmpTimeType (lambda (instClosure)
                                                                             (return (list #f instClosure)))))))   ;2. return instance closure (note not stored in state - this is temp) - #f for first val in list b/c no name b/c not in state
       ((eq? 'this leftObj) (return this))
+      ;TODO - add condition for if left of dot == 'super
       (else (V_get leftObj state (lambda (instClosure)
                                    (return (list leftObj instClosure)))))  ;this in the form of a list (name, instanceClosure)
         )))
