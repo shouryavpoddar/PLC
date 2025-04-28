@@ -538,15 +538,32 @@
 ;handle assignment statement
 (define S_assignStatement
   (lambda (stmt state this return throw-k)
-    (cond
-      ((and (list? (car stmt)) (V_declaredVar? (dotFieldName stmt) (varList this) (lambda (v) v))) ;check if an instance or local variable (could be smthn like x vs (dot this x)
-      ; (V_get (thisName this) state (lambda (thisInState)   ;lookup reference to this's object in state to update
-                            ;          (S_assign (dotFieldName stmt) (assignValue stmt) this (varList thisInState) return throw-k))))  ;I think thisInState will be a ref to the closure - THOUGHT - how is the closure in the 'this' we keep passing going to update?>???
-       (S_assign (dotFieldName stmt) (assignValue stmt) this state return throw-k))
-    ((V_declaredVar? (car stmt) state (lambda (v) v))  ;if was not a list then must be local var
-     (S_assign (car stmt) (assignValue stmt) this state return throw-k))
-    (else (error "variable not declared: " (car stmt)))
-    )))
+    (let* ((lhs          (car stmt))
+           (rhs          (cadr stmt))
+           (inst-closure (if (and (list? this)
+                                 (symbol? (car this))
+                                 (= (length this) 2))
+                             (cadr this)
+                             this)))
+      (cond
+        ((and (list? lhs)
+              (eq? (car lhs) 'dot)
+              (eq? (cadr lhs) 'this))
+         (let* ((fieldName (caddr lhs))
+                (binding   (assoc fieldName (caddr inst-closure)))) ; assoc get the element with that name example of list: ((name val))
+           (V_expressionEval rhs state this
+             (lambda (newVal)
+               (when binding
+                 (set-box! (cadr binding) newVal))  ; mutate that one box
+               (return state))
+             throw-k)))
+
+        ;; — normal local/global var assignment —
+        ((V_declaredVar? lhs state (λ (v) v))
+         (S_assign lhs rhs this state return throw-k))
+
+        (else
+         (error "variable not declared:" lhs))))))
 
 ;helper to check if variable declared
 (define V_declaredVar?
