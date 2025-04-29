@@ -6,12 +6,6 @@
 (provide interpret)
 
 
-;main function of the program
-;(define interpret
-;  (lambda (filename)
-;    (S_methodPass filename (lambda (globalState)   ;this should call classPass
-;                             (V_callFunction 'main '() globalState (lambda (v) v) #f)))))  ;call main function on the state compiled by global pass
-
 (define interpret
   (lambda (filename className)
     ;; 1) bind all the classes
@@ -20,8 +14,6 @@
         ;; 2) look up the requested class’s closure
         (V_get className classState
           (lambda (inputClassClosure)           
-            ;; cc is a list: (parent instState)
-            ;(let ((instState  (cadr inputClassClosure)))     ;we should not do this - instead, pass whole closure as compileTimeType
               ;; 3) invoke its `main` in that instance‐state
               (V_callFunction 'main
                               '()                  ;no args
@@ -34,38 +26,32 @@
     
 ;----------------------Global Class Pass------------------
 
-;1. define S_classPass
-    ;this function should go through outer level of parse and run through list of class declarations
-    ;probably have a classDeclarationList -> classDeclarationEval methods
-
-;2. define classDeclarationEval
-    ; this should call bindClass
-
-;3. define bindClass
-    ;this should create class binding, will need to call createClassClosure
-
+;initialize outermost pass through code
 (define S_classPass
   (lambda (filename return)
     (S_classDeclarationList (parser filename)
                             '(())    ; <- start empty
                             return)))
 
+;go through class declarations
 (define S_classDeclarationList
   (lambda (decls state return)
     (if (null? decls)
         (return state)
-        (let ((d (car decls)))
-          (if (and (list? d) (eq? (car d) 'class))
-              (classDeclarationEval d state
-                (lambda (st)
-                  (S_classDeclarationList (cdr decls) st return)))
-              (S_classDeclarationList (cdr decls) state return))))))
+        (if (and (list? (car decls)) (eq? (car (car decls)) 'class))
+            (S_classDeclarationEval (car decls) state
+              (lambda (st)
+                (S_classDeclarationList (cdr decls) st return)))
+            (S_classDeclarationList (cdr decls) state return)))))
 
-(define classDeclarationEval
+
+;evaluate individual class declaration
+(define S_classDeclarationEval
   (lambda (classAST state return)
-    (bindClass classAST state return)))
+    (S_bindClass classAST state return)))
 
-(define bindClass
+;bind class to its closure in state
+(define S_bindClass
   (lambda (classAST state return)
     (V_createClassClosure
       classAST
@@ -80,96 +66,42 @@
 
 ;-----------------------Class Closures--------------------------
 
-
-;4. define createClassClosure
-      ; class closure should contain:
-        ;a)parent/super class
-        ;b) list of instance field names and expressions that compute their initial values (if any)
-        ;c) list of method names and their closures
-        ;      - doing this will likely require calling S_methodPass (adjusted) inside the class
-
-;(define createClassClosure
-;  (lambda (class-body state return)
-    ;; a class‐closure is just a list:
-    ;;   '(class parent (list inst-fields inst-methods))
-;    (return (getParentName (caddr class-body) (lambda(v1) (list (S_classInternalDeclarationList (cadddr class-body)  state (lambda(v2) (list (list v1)  v2)))))))))
-
+;abstraction for name of class in class body
 (define className cadr)
 
-;updated version of createClassClosure with fixed CPS
+;function to create class closure
 (define V_createClassClosure
   (lambda (class-body state return)
-    (getParentName (caddr class-body)    ;TODO - change this to get whole parent's closure, or at least it's methAndVars - we will append this to our current methAndVars to support polymorphism
+    (V_getParentName (caddr class-body)
       (lambda (parentName)
-        (getParentMethAndVars parentName state
+        (V_getParentMethAndVars parentName state
           (lambda (parentMethAndVars)
-            (V_classInternalDeclarationList (cadddr class-body) '() ;state   ;start internal declaration list with empty state list
+            (V_classInternalDeclarationList (cadddr class-body) '() ;start internal declaration list with empty state list
               (lambda (methAndVars)
-                ;(return (list parent methAndVars (className class-body))))))))) ;hard-code in the name of the class at the end of the class closure
-                (return (list (append methAndVars parentMethAndVars) (className class-body))))))))))) ;hard-code in the name of the class at the end of the class closure
+                (return (list (append methAndVars parentMethAndVars) (className class-body))))))))))) ;hard-code in the name of the class at the end of the class closure for access
+                                                                                                      ;add parentMethods and Variables after this's to support polymorphism
 
-;;make this parent closure for easy access
-(define getParentName
+;helper to get name of parent class
+(define V_getParentName
   (lambda (class-info return)
     (if (null? class-info)         
         (return '())    ;if no parent class
         (return (cadr class-info)))))
 
 ;get the list of declared methods and variables in parent
-(define getParentMethAndVars
+(define V_getParentMethAndVars
   (lambda (parentName state return)
     (if (null? parentName)
         (return '())
         (V_get parentName state (lambda (parentClosure)
-                                  (return (cons (list 'super (box 'reserved)) (car parentClosure))))))))
-
-;not currently being used
-;(define getInstFieldsAndMethods
-;  (lambda (body state return)
-;    (cond
-;      ((null? body) state)
-;      (else (S_classInternalDeclarationEval (car body) state (lambda (s)
-;                                                                       (getInstFieldsAndMethods (cdr body) s return)))))))
-
-
-;-----------------------Instance Closure------------------------------
-
-
-(define fieldAndMethodList car)    ;(define fieldAndMethodList cadr)
-
-;should have a) runtimeType, b) compiletimeType c) values of all fields
-;   - instructions say compiletimeType should be manually passed everywhere, but tbh this seems easier
-(define V_makeInstanceClosure
-  (lambda (classClosure return)
-    (V_getInstanceFieldValues (fieldAndMethodList classClosure) (lambda (values)  ;initial values from class closure
-                                                                  (return (list classClosure classClosure values))))))  ;initialize runTimeType = compileTimeType - polymophism may reassign this later
-                                                                                                                        ;yes, runTimeType and compileTimeType are same rn - if it gets polymorphic then runTimeType will change - compile will always stay same
-
-;extract list of instance field values 
-(define V_getInstanceFieldValues
-  (lambda (declarationList return)
-    (cond
-      [(null? declarationList) (return '())]
-      [(list? (unbox (cadar declarationList))) (V_getInstanceFieldValues (cdr declarationList) return)] ;if value was list, this was a function
-      [else (V_getInstanceFieldValues (cdr declarationList) (lambda (cdrValues)
-                                                              (V_copyVar (car declarationList) (lambda (copiedCar)
-                                                                                                 (return (cons copiedCar cdrValues))))))])))
-
-;helper to copy variables when getting instance fields so as to not reference boxes in class closure
-(define V_copyVar
-  (lambda (referencedVar return)
-    (return (cons (car referencedVar) (list (box (unbox (cadr referencedVar))))))))
+                                  (return (cons (list 'super (box 'reserved)) (car parentClosure)))))))) 
     
 
 
 ;--------------------- Class Internal Declarations-------------------
 
-
 ;first pass of file execution - binds all functions and class variables and methods to state
-;not currenlty being used
-;(define S_methodPass
-;  (lambda (filename return)
-;    (S_classInternalDeclarationList (parser filename) (list '()) return)))
+
 
 ;top level of global declarations - runs global declarations in declaration list in order
 (define V_classInternalDeclarationList
@@ -187,13 +119,12 @@
 (define S_classInternalDeclarationEval
   (lambda (declaration state return)
     (cond
-      [(or (eq? (dclrType declaration) 'function) (eq? (dclrType declaration) 'static-function))
-       (S_bindFunction (dclrBody declaration) state return)]
-      [(eq? (dclrType declaration) 'var)
-       (declareStatement (dclrBody declaration) state #f return #f)]    ;passing #f as 'this' for now - CHANGE THIS LATER if we start binding var declarations to their pre-evaluated expressions and not values
-      [else
-       (return state)])))
-      ;todo - nested classes?
+      ((or (eq? (dclrType declaration) 'function) (eq? (dclrType declaration) 'static-function))
+       (S_bindFunction (dclrBody declaration) state return))
+      ((eq? (dclrType declaration) 'var)
+       (declareStatement (dclrBody declaration) state #f return #f))
+      (else
+       (return state)))))
 
 ;abstraction for function name
 (define name car)
@@ -242,13 +173,12 @@
     (return
       (list params
             body 
-            (lambda (args selfClosure cmplTimeType closureReturn)   ;environment function  ;EDIT - taking in compileTimeType to add that to env as well
-              (S_bindParamsToArgs params args localState   ;TODO - maybe need to add 'this' in to state as a param
+            (lambda (args selfClosure cmplTimeType closureReturn)   ;environment function  
+              (S_bindParamsToArgs params args localState 
                 (lambda (paramState)
                   (S_addBinding fname selfClosure paramState
                                 (lambda (methodClosureState)
                                   (S_addBinding (clsName cmplTimeType) cmplTimeType methodClosureState closureReturn)))))))))) ;get name from class closure (cmplTimeType, bind to closure itself
-                                  ; (lambda clsName   TODO: add function to get compileTimeType
 
 ;helper to bind list of formal params to function arguments
 ;ASSUMPTION - params and args are same length
@@ -267,6 +197,35 @@
            (S_bindParamsToArgs (cdr params) (cdr args) updatedState return)))])))
 
 
+;-----------------------Instance Closure------------------------------
+
+;abstraction to get list of declared methods and fields from closure
+(define fieldAndMethodList car)
+
+;should have a) runtimeType, b) compiletimeType c) values of all fields
+;create instance closure for new object
+(define V_makeInstanceClosure
+  (lambda (classClosure return)
+    (V_getInstanceFieldValues (fieldAndMethodList classClosure) (lambda (values)  ;initial values from class closure
+                                                                  (return (list classClosure classClosure values))))))  ;initialize runTimeType = compileTimeType - polymophism may reassign this later
+                                                                                                                       
+
+;extract list of instance field values 
+(define V_getInstanceFieldValues
+  (lambda (declarationList return)
+    (cond
+      ((null? declarationList) (return '()))
+      ((list? (unbox (cadar declarationList))) (V_getInstanceFieldValues (cdr declarationList) return)) ;if value was list, this was a function
+      (else (V_getInstanceFieldValues (cdr declarationList) (lambda (cdrValues)
+                                                              (V_copyVar (car declarationList) (lambda (copiedCar)
+                                                                                                 (return (cons copiedCar cdrValues))))))))))
+
+;helper to copy variables when getting instance fields so as to not reference boxes in class closure
+(define V_copyVar
+  (lambda (referencedVar return)
+    (return (cons (car referencedVar) (list (box (unbox (cadr referencedVar))))))))
+
+
 ;--------------------- Function Execution-------------------
 
 
@@ -278,7 +237,7 @@
 (define cEnvFunction caddr)
 
 ;get runtime type from instance closure
-(define runTimeMethAndVars caaadr)  ;...i think...
+(define runTimeMethAndVars caaadr) 
 
 ;calls a function and returns its output value or nothing
 (define V_callFunction
@@ -289,10 +248,10 @@
       [(null? this)
        (V_get fname cmplTimeType    ;if calling static (for main)
               (lambda (closure)
-                (V_evaluateArgs argExpressions state this;I think we eval in this state..?
+                (V_evaluateArgs argExpressions state this
                   (lambda (args)
-                    (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))] ;New - pass compile time type to evalFunction
-      [(eq? #t super?)  ;TODO - evaluate on super
+                    (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))]
+      [(eq? #t super?) 
        (V_getSuperMethAndVars (runTimeMethAndVars this)
                               (lambda (superMethAndVars)
                                 (V_get fname superMethAndVars
@@ -303,9 +262,9 @@
       [else
        (V_get fname (runTimeMethAndVars this)     ;3. get method closure from runtimeType (change from state)
               (lambda (closure)
-                (V_evaluateArgs argExpressions state this ;I think we eval in this state..?
+                (V_evaluateArgs argExpressions state this
                                 (lambda (args)
-                                  (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))]))) ;New - pass compile time type to evalFunction
+                                  (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))]))) 
 
 ;helper to evaluate method arguments expressions and return list of their values
 (define V_evaluateArgs
@@ -323,56 +282,8 @@
   (lambda (methAndVars return)
     (cond
       [(null? methAndVars)             (error "called super on object with no superclass")] ;reached end of list before finding super
-      [(eq? 'super (caar methAndVars)) (return (cdr methAndVars))]                          ;note - super should always be nested at this level (I think)
+      [(eq? 'super (caar methAndVars)) (return (cdr methAndVars))]                          ;note - super should always be nested at this level 
       [else                            (V_getSuperMethAndVars (cdr methAndVars) return)])))
-
-; Check if a variable is declared in a single frame (the current block)
-(define V_declaredInFrame?
-  (lambda (name frame)
-    (cond
-      [(null? frame)
-       #f]
-      [(or (eq? name (car frame))
-           (and (list? (car frame))
-                (eq? name (caar frame))))
-       #t]
-      [else
-       (V_declaredInFrame? name (cdr frame))])))
-
-(define V_searchFrame
-  (lambda (name bindings return)
-    (cond
-      [(null? bindings)           (error "Should not happen: variable declared but binding not found")]
-      [(eq? name (car bindings))  (return (cadr bindings))]  ; foun
-      [(eq? name (caar bindings)) (return (cadar bindings))] ; found it!
-      [else                       (V_searchFrame name (cdr bindings) return)])))
-
-(define V_declaredVarInCurrentBlock?
-  (lambda (name state return)
-    (if (null? state)
-        (return #f)
-        ; state’s car is the top frame.
-        (return (V_declaredInFrame? name (car state))))))
-
-; Helper: replace binding in one frame.
-(define V_replaceInFrame
-  (lambda (name val frame)
-    (cond
-      [(null? frame)
-       '()]
-      [(eq? name (caar frame))
-       (cons (list name (box val)) (cdr frame))]
-      [else
-       (cons (car frame) (V_replaceInFrame name val (cdr frame)))])))
-
-; Replace binding for name in the current (top) frame only.
-(define S_replaceBindingInCurrentBlock
-  (lambda (name val state return)
-    (if (null? state)
-        (error "No block frame available")
-        (let ((top (car state))
-              (rest (cdr state)))
-          (return (cons (V_replaceInFrame name val top) rest))))))
 
 ;evaluates a function given its closure - helper
 (define V_evaluateFunction
@@ -404,8 +315,6 @@
 (define stmtType car)
 ;abstraction for statement body
 (define stmtBody cdr)
-;abstraction for function name from statement body
-(define fName cadr)
 ;abstraction for the function input parameters from the statement body
 (define fParams cddr)
 
@@ -417,9 +326,8 @@
        (V_returnStatement (stmtBody statement) state this exit throw-k)]
       [(eq? (stmtType statement) 'funcall)  ;just call expressionEval and let it handle this
        (V_expressionEval statement state this (lambda (ignore) (return state)) throw-k)]
-       ;(V_callFunction (fName statement) (fParams statement) state (lambda (ignore) (return state)) throw-k))  
       [(eq? (stmtType statement) 'function)  ;nested function declaration
-       (S_bindFunction (stmtBody statement) state return)]  ;no need to pass this... (I think)
+       (S_bindFunction (stmtBody statement) state return)] 
       [(eq? (stmtType statement) 'var)
        (declareStatement (stmtBody statement) state this return throw-k)]
       [(eq? (stmtType statement) '=)
@@ -435,7 +343,7 @@
       [(eq? (stmtType statement) 'continue)
        (if continue-k (continue-k state) (error "'continue' used outside of loop"))]
       [(eq? (stmtType statement) 'throw)
-       (if throw-k (SV_throw (cadr statement) state this throw-k)  ;I think needs this here...?
+       (if throw-k (SV_throw (cadr statement) state this throw-k) 
          (error "'throw' used outside of try"))]
       [(eq? (stmtType statement) 'try)
        (S_tryCatchFinallyStatement (stmtBody statement) state this return exit break-k continue-k throw-k)])))
@@ -462,19 +370,23 @@
 
 ;--------------------- Try Catch Finally Statements -------------------
 
-
+;helper to find try block
 (define try-block
   (lambda (stmts) (car stmts)))
 
+;helper to find catch block
 (define catch-block
   (lambda (stmts) (cadr stmts)))  ; Returns the entire catch clause: (catch (e) ((= x e)))
 
+;helper to check if try catch has finally statement
 (define has-finally?
   (lambda (stmts) (not (null? (caddr stmts)))))  ; True if a finally clause exists.
 
+;helper to find finally block
 (define finally-block
   (lambda (stmts) (caddr stmts)))  ; Returns the entire finally clause: (finally ((= x (+ x 100))))
 
+;handle try-catch-finally operation
 (define S_tryCatchFinallyStatement
   (lambda (stmts state this return exit break-k continue-k throw-k)
     (S_statementList (try-block stmts) state this
@@ -562,39 +474,41 @@
 
 ;--------------------------- Assigment --------------------------------
 
-
-;(define assignValue cadr)
-;(define dotFieldName caddar)
-;(define varList (compose car cddadr))
-;(define thisName car)
-
 ;handle assignment statement
 (define S_assignStatement
   (lambda (stmt state this return throw-k)
-    (let* ((lhs          (car stmt))
-           (rhs          (cadr stmt))
-           (inst-closure (if (and (not (null? this));(list? this)
-                                 (symbol? (car this))
-                                 (= (length this) 2))
-                             (cadr this)
-                             this)))
-      (cond
-        [(and (list? lhs)
-              (eq? (car lhs) 'dot)
-              (eq? (cadr lhs) 'this))
-         (let* ((fieldName (caddr lhs))
-                (binding   (assoc fieldName (caddr inst-closure)))) ; assoc get the element with that name example of list: ((name val))
-           (V_expressionEval rhs state this
-             (lambda (newVal)
-               (when binding
-                 (set-box! (cadr binding) newVal))  ; mutate that one box
-               (return state))
-             throw-k))]
-        ;; — normal local/global var assignment —
-        [(V_declaredVar? lhs state (λ (v) v))
-         (S_assign lhs rhs this state return throw-k)]
-        [else
-         (error "variable not declared:" lhs)]))))
+    (cond
+      [(and (list? (car stmt))
+            (eq? (caar stmt) 'dot)
+            (eq? (cadar stmt) 'this))
+       (V_expressionEval (cadr stmt) state
+         (if (and (not (null? this))
+                  (symbol? (car this))
+                  (= (length this) 2))
+             (cadr this)
+             this)
+         (lambda (newVal)
+           (let ((inst-closure (if (and (not (null? this))
+                                        (symbol? (car this))
+                                        (= (length this) 2))
+                                   (cadr this)
+                                   this)))
+             (when (assoc (caddr (car stmt)) (caddr inst-closure))
+               (set-box! (cadr (assoc (caddr (car stmt)) (caddr inst-closure))) newVal)))
+           (return state))
+         throw-k)]
+      [(V_declaredVar? (car stmt) state (lambda (v) v))
+       (S_assign (car stmt) (cadr stmt)
+                 (if (and (not (null? this))
+                          (symbol? (car this))
+                          (= (length this) 2))
+                     (cadr this)
+                     this)
+                 state return throw-k)]
+      [else
+       (error "variable not declared:" (car stmt))])))
+
+
 
 ;helper to check if variable declared
 (define V_declaredVar?
@@ -626,12 +540,14 @@
 ; Sample State ((x 10) (y 9) (z true))
 ; Sample State with Code Block : ( ( (x 10) (y 9) ) (z true) )
 
+;replace binding in state
 (define S_replaceBinding
   (lambda (name val state return)
     (S_replaceBinding* name val state
       (lambda (new-state)
-        (remove-updated-cps new-state return)))))   ;in case of uncaught updated flag lingering in state
+        (remove-updated-cps new-state return)))))   ;in case of uncaught updated flag lingering in state (should never happen)
 
+;helper to catch any lingering updated flags (should never find any)
 (define remove-updated-cps
   (lambda (lst return)
     (cond
@@ -724,6 +640,56 @@
                                  (error "Variable not declared")
                                  (return v)))))))
 
+; Check if a variable is declared in a single frame (the current block)
+(define V_declaredInFrame?
+  (lambda (name frame)
+    (cond
+      [(null? frame)
+       #f]
+      [(or (eq? name (car frame))
+           (and (list? (car frame))
+                (eq? name (caar frame))))
+       #t]
+      [else
+       (V_declaredInFrame? name (cdr frame))])))
+
+;helper to search state frame for something
+(define V_searchFrame
+  (lambda (name bindings return)
+    (cond
+      [(null? bindings)           (error "Should not happen: variable declared but binding not found")]
+      [(eq? name (car bindings))  (return (cadr bindings))]  ; found
+      [(eq? name (caar bindings)) (return (cadar bindings))] ; found
+      [else                       (V_searchFrame name (cdr bindings) return)])))
+
+;helper to check if variable declared in current block of state
+(define V_declaredVarInCurrentBlock?
+  (lambda (name state return)
+    (if (null? state)
+        (return #f)
+        ; state’s car is the top frame.
+        (return (V_declaredInFrame? name (car state))))))
+
+; Helper: replace binding in one frame.
+(define V_replaceInFrame
+  (lambda (name val frame)
+    (cond
+      [(null? frame)
+       '()]
+      [(eq? name (caar frame))
+       (cons (list name (box val)) (cdr frame))]
+      [else
+       (cons (car frame) (V_replaceInFrame name val (cdr frame)))])))
+
+; Replace binding for name in the current (top) frame only.
+(define S_replaceBindingInCurrentBlock
+  (lambda (name val state return)
+    (if (null? state)
+        (error "No block frame available")
+        (let ((top (car state))
+              (rest (cdr state)))
+          (return (cons (V_replaceInFrame name val top) rest))))))
+
 
 ; ------------------- Expression Evalutation -------------------------
 
@@ -802,12 +768,11 @@
                                     (V_getFunName exp
                                                   (lambda (funName)
                                                     (if (eq? 'super newThis)
-                                                        (V_callFunction funName (fParams exp) state this #t (cmpTimeType this) return throw-k)  ;pass super conditional as true
-                                                        (V_callFunction funName (fParams exp) state newThis #f (cmpTimeType newThis) return throw-k))))))))] ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
-      ;eval (dot obj varName), NOT for function calls
+                                                        (V_callFunction funName (fParams exp) state this #t (cmpTimeType this) return throw-k)  ;pass super conditional as true  
+                                                        (V_callFunction funName (fParams exp) state newThis #f (cmpTimeType newThis) return throw-k))))))))] ;pass normally
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
-      [(eq? (car exp) 'dot)         ;NOTE - NOW HAS ACCESS TO 'this
+      [(eq? (car exp) 'dot)     
        (V_dotEval (dotName exp) state this (lambda (newThis)
                                              (V_get (varName exp) (varValues newThis) return)))])))
 
@@ -818,6 +783,7 @@
         (return (cadadr exp))   ;if called on dot
         (return 'this))))   ;if no dot, implictly calling on 'this
 
+;helper to get name of function
 (define V_getFunName
   (lambda (exp return)
     (if (list? (cadr exp))
