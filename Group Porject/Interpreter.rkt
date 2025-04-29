@@ -5,24 +5,24 @@
 (require "classParser.rkt")
 (provide interpret)
 
-
+;top level of interpreter: take input like (interpret "file.txt" "className")
 (define interpret
   (lambda (filename className)
     ;; 1) bind all the classes
     (S_classPass filename
       (lambda (classState)
         ;; 2) look up the requested class’s closure
-        (V_get className classState
-          (lambda (inputClassClosure)           
-              ;; 3) invoke its `main` in that instance‐state
-              (V_callFunction 'main
-                              '()                  ;no args
-                              classState           ;the state holding that class’s vars & methods
-                              '()                  ;null reference to 'this' b/c main is static
-                              #f                   ;not calling function on super
-                              inputClassClosure    ;the compile time type
-                              (lambda (v) v)       ;identity continuation
-                              #f)))))))            ;no throw‐k
+        (V_get (string->symbol className) classState
+          (lambda (inputClassClosure)
+            ;; 3) invoke its `main` in that instance‐state
+            (V_callFunction 'main
+                            '()                  ; no args
+                            classState           ; the state holding that class’s vars & methods
+                            '()                  ; null reference to 'this' because main is static
+                            #f                   ; not calling function on super
+                            inputClassClosure    ; the compile time type
+                            (lambda (v) v)       ; identity continuation
+                            #f)))))))
     
 ;----------------------Global Class Pass------------------
 
