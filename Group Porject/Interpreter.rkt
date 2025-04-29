@@ -27,6 +27,7 @@
                               '()           ; no args
                               classState    ; the state holding that class’s vars & methods
                               '()           ;null reference to 'this' b/c main is static
+                              #f             ;not calling function on super
                               inputClassClosure     ;the compile time type
                               (lambda (v) v)    ; identity continuation
                               #f))
@@ -281,25 +282,32 @@
 (define cEnvFunction caddr)
 
 ;get runtime type from instance closure
-(define runTimeType caadr)  ;...i think...
+(define runTimeMethAndVars caaadr)  ;...i think...
 
 ;calls a function and returns its output value or nothing
 (define V_callFunction
-  (lambda (fname argExpressions state this cmplTimeType return throw-k)
+  (lambda (fname argExpressions state this super? cmplTimeType return throw-k)
     ;1. get object calling method on (this) - recall this is an instance closure, which has: a) type, b)instance field value
     ;2. get runtime type of this
-    (if (null? this)
-        (V_get fname cmplTimeType    ;if calling static (for main)
+    (cond
+      ((null? this)(V_get fname cmplTimeType    ;if calling static (for main)
+                          (lambda (closure)
+                            (V_evaluateArgs argExpressions state this;I think we eval in this state..?
+                                            (lambda (args)
+                                              (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))) ;New - pass compile time type to evalFunction
+      ((eq? #t super?)  ;TODO - evaluate on super
+       (V_getSuperMethAndVars (runTimeMethAndVars this)
+                              (lambda (superMethAndVars)
+                                (V_get fname superMethAndVars
+                                       (lambda (closure)
+                                         (V_evaluateArgs argExpressions state this
+                                                         (lambda (args)
+                                                           (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k))))))
+      (else (V_get fname (runTimeMethAndVars this)     ;3. get method closure from runtimeType (change from state)
                (lambda (closure)
                  (V_evaluateArgs argExpressions state this;I think we eval in this state..?
                                  (lambda (args)
-                                   (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
- 
-        (V_get fname (runTimeType this)     ;3. get method closure from runtimeType (change from state)
-               (lambda (closure)
-                 (V_evaluateArgs argExpressions state this;I think we eval in this state..?
-                                 (lambda (args)
-                                   (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k))) ;New - pass compile time type to evalFunction
+                                   (V_evaluateFunction args closure state this cmplTimeType return throw-k)) throw-k)))) ;New - pass compile time type to evalFunction
         )))
     
 
@@ -313,6 +321,14 @@
             (V_evaluateArgs (cdr argExprs) state this (lambda (v2)
                                                         (return (cons v1 v2))) throw-k))
           throw-k))))
+
+;helper to get the section of methAndVars block that is only super
+(define V_getSuperMethAndVars
+  (lambda (methAndVars return)
+    (cond
+      ((null? methAndVars) (error "called super on object with no superclass"))   ;reached end of list before finding super
+      ((eq? 'super (caar methAndVars)) (return (cdr methAndVars))) ;note - super should always be nested at this level (I think)
+      (else (V_getSuperMethAndVars (cdr methAndVars) return)))))
 
 ; Check if a variable is declared in a single frame (the current block)
 (define V_declaredInFrame?
@@ -549,7 +565,7 @@
   (lambda (stmt state this return throw-k)
     (let* ((lhs          (car stmt))
            (rhs          (cadr stmt))
-           (inst-closure (if (and (list? this)
+           (inst-closure (if (and (not (null? this));(list? this)
                                  (symbol? (car this))
                                  (= (length this) 2))
                              (cadr this)
@@ -713,9 +729,9 @@
 ;get varValues (third item) from instance closure)
 (define varValues (compose car cddadr));caddr)
 ;get left side of dot expression
-(define dotLeft cadadr)
+;(define dotLeft cadadr)
 ;get name of function in expression
-(define funName (compose car cddadr))
+;(define funName (compose car cddadr))
 ;get name for dot expression variable val
 (define dotName cadr)
 ;get name for var when dot for variable eval
@@ -763,9 +779,16 @@
            (V_expressionEval (caddr exp) state this (lambda (v2) (return (or v1 v2))) throw-k))
          throw-k))
       ; Function call:
-      ((eq? (car exp) 'funcall)  
-       (V_dotEval (dotLeft exp) state this (lambda (newThis)  
-                                  (V_callFunction (funName exp) (fParams exp) state newThis (cmpTimeType newThis) return throw-k)))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
+      ((eq? (car exp) 'funcall)
+       (V_getDotLeft exp
+                     (lambda (dotLeft)
+                       (V_dotEval dotLeft state this
+                                  (lambda (newThis)
+                                    (V_getFunName exp
+                                                  (lambda (funName)
+                                                    (if (eq? 'super newThis)
+                                                        (V_callFunction funName (fParams exp) state this #t (cmpTimeType this) return throw-k)  ;pass super conditional as true
+                                                        (V_callFunction funName (fParams exp) state newThis #f (cmpTimeType newThis) return throw-k))))))))) ;will never be calling functions without dot operator anymore... so the dot operation is what should be passing us the info on type
       ;eval (dot obj varName), NOT for function calls
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
@@ -773,6 +796,19 @@
        (V_dotEval (dotName exp) state this (lambda (newThis)
                                              (V_get (varName exp) (varValues newThis) return))))
       )))
+
+;helper to get left side of dot expression
+(define V_getDotLeft
+  (lambda (exp return)
+    (if (list? (cadr exp))
+        (return (cadadr exp))   ;if called on dot
+        (return 'this))))   ;if no dot, implictly calling on 'this
+
+(define V_getFunName
+  (lambda (exp return)
+    (if (list? (cadr exp))
+        (return (car (cddadr exp)))  ;if called on dot
+        (return (cadr exp)))))
 
 ;helper to evaluate left side of dot expression --> returns instance closure
 (define V_dotEval
@@ -782,7 +818,7 @@
                                                      (V_makeInstanceClosure cmpTimeType (lambda (instClosure)
                                                                             (return (list #f instClosure)))))))   ;2. return instance closure (note not stored in state - this is temp) - #f for first val in list b/c no name b/c not in state
       ((eq? 'this leftObj) (return this))
-      ;TODO - add condition for if left of dot == 'super
+      ((eq? 'super leftObj) (return 'super)) ;return keyword super to tell function call to behave different - messy but may work
       (else (V_get leftObj state (lambda (instClosure)
                                    (return (list leftObj instClosure)))))  ;this in the form of a list (name, instanceClosure)
         )))
