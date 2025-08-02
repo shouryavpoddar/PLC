@@ -30,7 +30,7 @@
 (define S_classPass
   (lambda (filename return)
     (S_classDeclarationList (parser filename)
-                            '(())    ; <- start empty
+                            '()    ; <- start empty
                             return)))
 
 ;go through class declarations
@@ -76,9 +76,9 @@
       (lambda (parentName)
         (V_getParentMethAndVars parentName state
           (lambda (parentMethAndVars)
-            (V_classInternalDeclarationList (cadddr class-body) '() ;start internal declaration list with empty state list
+            (V_classInternalDeclarationList (cadddr class-body) state;'() ;start internal declaration list with empty state list
               (lambda (methAndVars)
-                (return (list (append methAndVars parentMethAndVars) (className class-body))))))))))) ;hard-code in the name of the class at the end of the class closure for access
+                (return (list (append methAndVars (if (null? parentMethAndVars) '() (cons (list 'super (box 'reserved)) (car parentMethAndVars)))) (className class-body) parentMethAndVars)))))))))) ;hard-code in the name of the class at the end of the class closure for access
                                                                                                       ;add parentMethods and Variables after this's to support polymorphism
 
 ;helper to get name of parent class
@@ -94,7 +94,8 @@
     (if (null? parentName)
         (return '())
         (V_get parentName state (lambda (parentClosure)
-                                  (return (cons (list 'super (box 'reserved)) (car parentClosure)))))))) 
+                                  ;(return (cons (list 'super (box 'reserved)) (car parentClosure))))))))
+                                  (return parentClosure))))))   ;EDIT NOTICE
     
 
 
@@ -768,7 +769,7 @@
                                     (V_getFunName exp
                                                   (lambda (funName)
                                                     (if (eq? 'super newThis)
-                                                        (V_callFunction funName (fParams exp) state this #t (cmpTimeType this) return throw-k)  ;pass super conditional as true  
+                                                        (V_callFunction funName (fParams exp) state this #t (caddr (cmpTimeType this)) return throw-k)  ;pass super conditional as true  
                                                         (V_callFunction funName (fParams exp) state newThis #f (cmpTimeType newThis) return throw-k))))))))] ;pass normally
       ;1. get left of dot expression (an instance closure)
       ;2. lookup the third param in instance closure vars list
